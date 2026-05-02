@@ -88,13 +88,16 @@
             border-right: none;
         }
 
-        #sidebar h3 {
-            font-size: 13px;
-            font-weight: 600;
-            padding: 4px 14px;
-            color: #fff;
-            letter-spacing: 0.3px;
+        .sidebar-header {
+            padding: 4px 14px 10px;
             white-space: nowrap;
+        }
+
+        .sidebar-logo {
+            display: block;
+            width: 174px;
+            height: auto;
+            filter: brightness(0) invert(1);
         }
 
         .section-label {
@@ -513,7 +516,9 @@
 
 <!-- Sidebar -->
 <div id="sidebar">
-    <h3>Model Inspector</h3>
+    <div class="sidebar-header">
+        <img class="sidebar-logo" src="images/ACTVET_Logo.png" alt="ACTVET">
+    </div>
 
     <div class="section-label">Wireframe</div>
     <div class="color-row" id="wireframe-colors">
