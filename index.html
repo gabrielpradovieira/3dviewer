@@ -1,0 +1,1649 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>3D Model Inspector</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #d0d0d0;
+            color: #e0e0e0;
+            overflow: hidden;
+            height: 100vh;
+            touch-action: none;
+        }
+
+        #canvas-container {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            transition: right 0.3s ease;
+        }
+
+        canvas { display: block; touch-action: none; }
+
+        /* ── 2D UV Panel ── */
+        #uv-panel {
+            position: absolute;
+            top: 0; right: 0;
+            width: 0;
+            height: 100%;
+            background: #e8e8e8;
+            border-left: 2px solid #999;
+            z-index: 90;
+            overflow: hidden;
+            transition: width 0.3s ease;
+        }
+
+        #uv-panel.open {
+            width: 50%;
+        }
+
+        #uv-panel canvas {
+            width: 100%;
+            height: 100%;
+        }
+
+        #uv-panel-label {
+            position: absolute;
+            top: 8px; left: 8px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            background: rgba(255,255,255,0.8);
+            padding: 4px 10px;
+            border-radius: 4px;
+            pointer-events: none;
+        }
+
+        /* ── Sidebar ── */
+        #sidebar {
+            position: absolute;
+            top: 0; left: 0;
+            width: 220px;
+            height: 100%;
+            background: rgba(18, 18, 30, 0.92);
+            backdrop-filter: blur(12px);
+            border-right: 1px solid rgba(255,255,255,0.08);
+            overflow-y: auto;
+            z-index: 100;
+            padding: 12px 0;
+            font-size: 13px;
+            user-select: none;
+            transition: width 0.25s ease, padding 0.25s ease;
+        }
+
+        #sidebar::-webkit-scrollbar { width: 4px; }
+        #sidebar::-webkit-scrollbar-track { background: transparent; }
+        #sidebar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
+
+        #sidebar.collapsed {
+            width: 0;
+            padding: 0;
+            overflow: hidden;
+            border-right: none;
+        }
+
+        #sidebar h3 {
+            font-size: 13px;
+            font-weight: 600;
+            padding: 4px 14px;
+            color: #fff;
+            letter-spacing: 0.3px;
+            white-space: nowrap;
+        }
+
+        .section-label {
+            font-size: 10px;
+            font-weight: 600;
+            color: rgba(255,255,255,0.35);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            padding: 12px 14px 4px;
+            white-space: nowrap;
+        }
+
+        .sidebar-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 14px;
+            cursor: pointer;
+            transition: background 0.15s;
+            color: #ccc;
+            white-space: nowrap;
+        }
+
+        .sidebar-item:hover { background: rgba(255,255,255,0.06); }
+        .sidebar-item.active {
+            background: rgba(59, 130, 246, 0.25);
+            color: #fff;
+        }
+
+        .radio-dot {
+            width: 14px; height: 14px;
+            border-radius: 50%;
+            border: 2px solid rgba(255,255,255,0.3);
+            flex-shrink: 0;
+            position: relative;
+        }
+
+        .sidebar-item.active .radio-dot {
+            border-color: #3b82f6;
+        }
+
+        .sidebar-item.active .radio-dot::after {
+            content: '';
+            position: absolute;
+            top: 2px; left: 2px;
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            background: #3b82f6;
+        }
+
+        .check-box {
+            width: 14px; height: 14px;
+            border-radius: 3px;
+            border: 2px solid rgba(255,255,255,0.3);
+            flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center;
+        }
+
+        .sidebar-item.active .check-box {
+            border-color: #3b82f6;
+            background: #3b82f6;
+        }
+
+        .sidebar-item.active .check-box::after {
+            content: '✓';
+            font-size: 10px;
+            color: #fff;
+        }
+
+        /* ── Wireframe color swatches ── */
+        .color-row {
+            display: flex;
+            gap: 4px;
+            padding: 6px 14px;
+            align-items: center;
+        }
+
+        .color-swatch {
+            width: 20px; height: 20px;
+            border-radius: 3px;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: border-color 0.15s;
+        }
+
+        .color-swatch.active { border-color: #fff; }
+        .color-swatch:hover { border-color: rgba(255,255,255,0.5); }
+
+        /* ── Slider rows ── */
+        .slider-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 14px;
+        }
+
+        .slider-row label {
+            font-size: 11px;
+            color: rgba(255,255,255,0.5);
+            white-space: nowrap;
+        }
+
+        .slider-row input[type="range"] {
+            flex: 1;
+            height: 4px;
+            -webkit-appearance: none;
+            background: rgba(255,255,255,0.15);
+            border-radius: 2px;
+            outline: none;
+        }
+
+        .slider-row input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 12px; height: 12px;
+            border-radius: 50%;
+            background: #3b82f6;
+            cursor: pointer;
+        }
+
+        .slider-row .value {
+            font-size: 11px;
+            color: rgba(255,255,255,0.5);
+            min-width: 24px;
+            text-align: right;
+        }
+
+        /* ── Viewport tabs ── */
+        .tab-row {
+            display: flex;
+            gap: 2px;
+            padding: 6px 14px;
+        }
+
+        .tab-btn {
+            padding: 4px 14px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            background: rgba(255,255,255,0.08);
+            color: #aaa;
+            transition: all 0.15s;
+        }
+
+        .tab-btn.active {
+            background: #3b82f6;
+            color: #fff;
+        }
+
+        .tab-btn:hover:not(.active) {
+            background: rgba(255,255,255,0.12);
+        }
+
+        .divider {
+            height: 1px;
+            background: rgba(255,255,255,0.06);
+            margin: 8px 0;
+        }
+
+        /* ── Sidebar collapse ── */
+        #sidebar-toggle {
+            position: absolute;
+            top: 12px;
+            left: 220px;
+            width: 28px; height: 28px;
+            border-radius: 0 6px 6px 0;
+            background: rgba(18, 18, 30, 0.92);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-left: none;
+            color: rgba(255,255,255,0.6);
+            font-size: 14px;
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            z-index: 101;
+            transition: left 0.25s ease, background 0.15s;
+        }
+
+        #sidebar-toggle:hover { color: #fff; background: rgba(255,255,255,0.1); }
+
+        body.sidebar-collapsed #sidebar-toggle { left: 0; }
+        body.sidebar-collapsed #model-bar { left: 48px; }
+        body.sidebar-collapsed #help-btn { left: 48px; }
+        body.sidebar-collapsed #help-tooltip { left: 48px; }
+
+        #model-bar, #help-btn, #help-tooltip {
+            transition: left 0.25s ease;
+        }
+
+        /* ── Model Switcher (top bar) ── */
+        #model-bar {
+            position: absolute;
+            top: 12px;
+            left: 260px;
+            display: flex;
+            gap: 8px;
+            z-index: 100;
+        }
+
+        .model-btn {
+            padding: 8px 18px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            border: 1px solid rgba(0,0,0,0.12);
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(8px);
+            color: #444;
+            transition: all 0.2s;
+        }
+
+        .model-btn:hover { background: rgba(59, 130, 246, 0.15); border-color: rgba(59,130,246,0.3); color: #222; }
+        .model-btn.active {
+            background: rgba(59, 130, 246, 0.9);
+            border-color: #3b82f6;
+            color: #fff;
+        }
+
+        /* ── Stats overlay ── */
+        #stats-panel {
+            position: absolute;
+            bottom: 12px;
+            right: 12px;
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(0,0,0,0.1);
+            border-radius: 8px;
+            padding: 10px 16px;
+            font-size: 12px;
+            z-index: 100;
+            min-width: 180px;
+            transition: right 0.3s ease;
+        }
+
+        #stats-panel .stat-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 2px 0;
+        }
+
+        #stats-panel .stat-label { color: #888; }
+        #stats-panel .stat-value { color: #222; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+        /* ── Animation controls ── */
+        #anim-panel {
+            position: absolute;
+            bottom: 12px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(0,0,0,0.1);
+            border-radius: 8px;
+            padding: 8px 16px;
+            display: none;
+            align-items: center;
+            gap: 12px;
+            z-index: 100;
+            font-size: 12px;
+            color: #444;
+        }
+
+        #anim-panel button {
+            background: rgba(0,0,0,0.08);
+            border: none;
+            color: #333;
+            width: 32px; height: 32px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 14px;
+            display: flex; align-items: center; justify-content: center;
+            transition: background 0.15s;
+        }
+
+        #anim-panel button:hover { background: rgba(59, 130, 246, 0.2); }
+
+        #anim-panel select {
+            background: rgba(0,0,0,0.06);
+            border: 1px solid rgba(0,0,0,0.15);
+            color: #333;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        #anim-panel .time-display {
+            color: #666;
+            font-variant-numeric: tabular-nums;
+            min-width: 80px;
+        }
+
+        /* ── Loading overlay ── */
+        #loading {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(200, 200, 200, 0.95);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 200;
+            transition: opacity 0.3s;
+        }
+
+        #loading.hidden { opacity: 0; pointer-events: none; }
+
+        .spinner {
+            width: 40px; height: 40px;
+            border: 3px solid rgba(0,0,0,0.1);
+            border-top-color: #3b82f6;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        #loading p { margin-top: 12px; color: #666; font-size: 13px; }
+
+        /* ── Drop zone ── */
+        #drop-zone {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(59, 130, 246, 0.15);
+            border: 3px dashed #3b82f6;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 300;
+            font-size: 18px;
+            color: #3b82f6;
+            font-weight: 600;
+        }
+
+        /* ── Help tooltip ── */
+        #help-btn {
+            position: absolute;
+            bottom: 12px;
+            left: 260px;
+            width: 32px; height: 32px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(0,0,0,0.1);
+            color: #888;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            z-index: 100;
+            transition: all 0.15s;
+        }
+
+        #help-btn:hover { color: #333; border-color: rgba(0,0,0,0.2); }
+
+        #help-tooltip {
+            position: absolute;
+            bottom: 52px;
+            left: 260px;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(0,0,0,0.1);
+            border-radius: 8px;
+            padding: 14px 18px;
+            font-size: 12px;
+            line-height: 1.7;
+            color: #555;
+            z-index: 100;
+            display: none;
+            max-width: 280px;
+        }
+
+        #help-tooltip kbd {
+            background: rgba(0,0,0,0.08);
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-family: inherit;
+            font-size: 11px;
+            color: #333;
+        }
+
+        /* ── Mobile adjustments ── */
+        @media (max-width: 768px) {
+            #sidebar { width: 180px; font-size: 12px; }
+            #sidebar-toggle { left: 180px; }
+            #model-bar { left: 200px; top: 8px; gap: 4px; }
+            .model-btn { padding: 6px 12px; font-size: 11px; }
+            #stats-panel { font-size: 11px; padding: 8px 12px; min-width: 150px; }
+            #help-btn { left: 200px; }
+            #help-tooltip { left: 200px; }
+            body.sidebar-collapsed #model-bar { left: 40px; }
+            body.sidebar-collapsed #help-btn { left: 40px; }
+        }
+
+        @media (max-width: 480px) {
+            #sidebar { width: 160px; }
+            #sidebar-toggle { left: 160px; }
+            #model-bar { left: 180px; flex-wrap: wrap; }
+            #help-btn { left: 180px; }
+        }
+    </style>
+</head>
+<body>
+
+<div id="canvas-container"></div>
+
+<!-- 2D UV Panel -->
+<div id="uv-panel">
+    <canvas id="uv-canvas"></canvas>
+    <div id="uv-panel-label">UV Layout</div>
+</div>
+
+<!-- Sidebar toggle -->
+<button id="sidebar-toggle" title="Collapse/Expand">◀</button>
+
+<!-- Sidebar -->
+<div id="sidebar">
+    <h3>Model Inspector</h3>
+
+    <div class="section-label">Wireframe</div>
+    <div class="color-row" id="wireframe-colors">
+        <div class="color-swatch" data-color="#ffffff" style="background:#fff"></div>
+        <div class="color-swatch" data-color="#000000" style="background:#000"></div>
+        <div class="color-swatch" data-color="#888888" style="background:#888"></div>
+        <div class="color-swatch active" data-color="#ff0000" style="background:#f00"></div>
+        <div class="color-swatch" data-color="#ff00ff" style="background:#f0f"></div>
+        <div class="color-swatch" data-color="#00ff00" style="background:#0f0"></div>
+        <div class="color-swatch" data-color="#ffff00" style="background:#ff0"></div>
+    </div>
+    <div class="slider-row">
+        <label>Width</label>
+        <input type="range" id="wireframe-width" min="1" max="5" step="0.5" value="1">
+        <span class="value" id="wireframe-width-val">1</span>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="section-label">Viewport</div>
+    <div class="tab-row">
+        <button class="tab-btn active" data-viewport="3d">3D</button>
+        <button class="tab-btn" data-viewport="2d">2D</button>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="section-label">Shaders</div>
+    <div class="sidebar-item active" data-mode="final">
+        <div class="radio-dot"></div>
+        <span>Final Render</span>
+    </div>
+    <div class="sidebar-item" data-mode="nopost">
+        <div class="radio-dot"></div>
+        <span>No Post-Processing</span>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="section-label">Material Channels</div>
+    <div class="sidebar-item" data-mode="basecolor">
+        <div class="radio-dot"></div>
+        <span>Base Color</span>
+    </div>
+    <div class="sidebar-item" data-mode="metalness">
+        <div class="radio-dot"></div>
+        <span>Metalness</span>
+    </div>
+    <div class="sidebar-item" data-mode="roughness">
+        <div class="radio-dot"></div>
+        <span>Roughness</span>
+    </div>
+    <div class="sidebar-item" data-mode="normal">
+        <div class="radio-dot"></div>
+        <span>Normal Map</span>
+    </div>
+    <div class="sidebar-item" data-mode="opacity">
+        <div class="radio-dot"></div>
+        <span>Opacity</span>
+    </div>
+    <div class="sidebar-item" data-mode="emission">
+        <div class="radio-dot"></div>
+        <span>Emission</span>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="section-label">Geometry</div>
+    <div class="sidebar-item" data-mode="matcap">
+        <div class="radio-dot"></div>
+        <span>Matcap</span>
+    </div>
+    <div class="sidebar-item" data-mode="matcap-surface">
+        <div class="radio-dot"></div>
+        <span>Matcap+Surface</span>
+    </div>
+    <div class="sidebar-item" data-mode="wireframe">
+        <div class="check-box"></div>
+        <span>Wireframe</span>
+    </div>
+    <div class="sidebar-item" data-mode="vertexnormals">
+        <div class="check-box"></div>
+        <span>Vertex Normals</span>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="section-label">UVs</div>
+    <div class="sidebar-item" data-mode="uvchecker">
+        <div class="check-box"></div>
+        <span>UV Checker</span>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="section-label">Display</div>
+    <div class="sidebar-item" data-mode="autorotate">
+        <div class="check-box"></div>
+        <span>Auto-Rotate</span>
+    </div>
+    <div class="slider-row" id="rotate-speed-row" style="display:none">
+        <label>Speed</label>
+        <input type="range" id="rotate-speed" min="0.1" max="5" step="0.1" value="2">
+        <span class="value" id="rotate-speed-val">2.0</span>
+    </div>
+</div>
+
+<!-- Model switcher -->
+<div id="model-bar">
+    <button class="model-btn active" data-model="0">Model 1</button>
+    <button class="model-btn" data-model="1">Model 2</button>
+    <button class="model-btn" data-model="2">Model 3</button>
+</div>
+
+<!-- Stats -->
+<div id="stats-panel">
+    <div class="stat-row">
+        <span class="stat-label">Triangles</span>
+        <span class="stat-value" id="stat-triangles">0</span>
+    </div>
+    <div class="stat-row">
+        <span class="stat-label">Vertices</span>
+        <span class="stat-value" id="stat-vertices">0</span>
+    </div>
+    <div class="stat-row">
+        <span class="stat-label">Meshes</span>
+        <span class="stat-value" id="stat-meshes">0</span>
+    </div>
+    <div class="stat-row">
+        <span class="stat-label">Materials</span>
+        <span class="stat-value" id="stat-materials">0</span>
+    </div>
+    <div class="stat-row">
+        <span class="stat-label">Textures</span>
+        <span class="stat-value" id="stat-textures">0</span>
+    </div>
+</div>
+
+<!-- Animation panel -->
+<div id="anim-panel">
+    <button id="anim-play" title="Play/Pause">&#9654;</button>
+    <select id="anim-select"></select>
+    <span class="time-display" id="anim-time">0.00 / 0.00s</span>
+    <input type="range" id="anim-scrub" min="0" max="100" value="0" style="width:120px">
+    <label style="font-size:11px;color:#888">Speed</label>
+    <input type="range" id="anim-speed" min="0.1" max="3" step="0.1" value="1" style="width:60px">
+    <span class="value" id="anim-speed-val">1x</span>
+</div>
+
+<!-- Loading -->
+<div id="loading">
+    <div class="spinner"></div>
+    <p id="loading-text">Loading model...</p>
+</div>
+
+<!-- Drop zone -->
+<div id="drop-zone">Drop FBX / OBJ files here</div>
+
+<!-- Help -->
+<button id="help-btn">?</button>
+<div id="help-tooltip">
+    <strong>Controls</strong><br>
+    <kbd>LMB</kbd> / Touch: Orbit<br>
+    <kbd>RMB</kbd> / 2-finger: Pan<br>
+    <kbd>Scroll</kbd> / Pinch: Zoom<br>
+    <kbd>1-3</kbd> Switch models<br>
+    <kbd>W</kbd> Toggle wireframe<br>
+    <kbd>N</kbd> Toggle normals<br>
+    <kbd>U</kbd> Toggle UV checker<br>
+    <kbd>A</kbd> Toggle auto-rotate<br>
+    <kbd>Space</kbd> Play/Pause animation<br>
+    <kbd>R</kbd> Reset camera<br>
+    Drag &amp; drop FBX/OBJ files to load
+</div>
+
+<!-- Three.js and loaders from CDN -->
+<script type="importmap">
+{
+    "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.162.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.162.0/examples/jsm/"
+    }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
+import { VertexNormalsHelper } from 'three/addons/helpers/VertexNormalsHelper.js';
+
+// ─── Scene setup ───
+const container = document.getElementById('canvas-container');
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.2;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+container.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xd0d0d0);
+
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.01, 1000);
+camera.position.set(3, 2, 3);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.rotateSpeed = 0.8;
+controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
+
+// ─── Lighting ───
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+scene.add(ambientLight);
+
+const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
+dirLight.position.set(5, 8, 5);
+dirLight.castShadow = true;
+dirLight.shadow.mapSize.set(2048, 2048);
+dirLight.shadow.camera.near = 0.1;
+dirLight.shadow.camera.far = 50;
+dirLight.shadow.camera.left = -10;
+dirLight.shadow.camera.right = 10;
+dirLight.shadow.camera.top = 10;
+dirLight.shadow.camera.bottom = -10;
+scene.add(dirLight);
+
+const fillLight = new THREE.DirectionalLight(0x8888ff, 0.3);
+fillLight.position.set(-3, 2, -3);
+scene.add(fillLight);
+
+const hemiLight = new THREE.HemisphereLight(0xffffff, 0x888888, 0.4);
+scene.add(hemiLight);
+
+// Ground grid
+const gridHelper = new THREE.GridHelper(10, 20, 0x999999, 0xbbbbbb);
+scene.add(gridHelper);
+
+// ─── Matcap texture ───
+function createMatcapTexture() {
+    const size = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = size; canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    const grad = ctx.createRadialGradient(size*0.45, size*0.35, 0, size*0.5, size*0.5, size*0.5);
+    grad.addColorStop(0, '#e8e0d8');
+    grad.addColorStop(0.4, '#b8a898');
+    grad.addColorStop(0.7, '#786858');
+    grad.addColorStop(1, '#382820');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, size, size);
+    return new THREE.CanvasTexture(canvas);
+}
+
+const matcapTexture = createMatcapTexture();
+
+// UV checker texture
+function createUVCheckerTexture() {
+    const size = 512;
+    const canvas = document.createElement('canvas');
+    canvas.width = size; canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    const cells = 8;
+    const cellSize = size / cells;
+    for (let y = 0; y < cells; y++) {
+        for (let x = 0; x < cells; x++) {
+            ctx.fillStyle = (x + y) % 2 === 0 ? '#808080' : '#404040';
+            ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+        }
+    }
+    ctx.strokeStyle = '#00ff00';
+    ctx.lineWidth = 2;
+    for (let i = 0; i <= cells; i++) {
+        ctx.beginPath(); ctx.moveTo(i * cellSize, 0); ctx.lineTo(i * cellSize, size); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, i * cellSize); ctx.lineTo(size, i * cellSize); ctx.stroke();
+    }
+    ctx.fillStyle = '#ff0000';
+    ctx.font = `${cellSize * 0.3}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (let y = 0; y < cells; y++) {
+        for (let x = 0; x < cells; x++) {
+            ctx.fillText(`${x},${y}`, (x + 0.5) * cellSize, (y + 0.5) * cellSize);
+        }
+    }
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    return tex;
+}
+
+const uvCheckerTexture = createUVCheckerTexture();
+
+// ─── State ───
+const state = {
+    models: [null, null, null],
+    modelConfigs: [
+        { path: 'models/model1/', file: null },
+        { path: 'models/model2/', file: null },
+        { path: 'models/model3/', file: null }
+    ],
+    currentModelIndex: 0,
+    currentModel: null,
+    originalMaterials: new Map(),
+    renderMode: 'final',
+    wireframeOverlay: false,
+    wireframeColor: '#ff0000',
+    wireframeWidth: 1,
+    vertexNormalsVisible: false,
+    uvCheckerVisible: false,
+    normalHelpers: [],
+    wireframeMeshes: [],
+    mixer: null,
+    currentAction: null,
+    animations: [],
+    clock: new THREE.Clock(),
+    animPlaying: false,
+    autoRotate: false,
+    autoRotateSpeed: 2,
+    show2D: false
+};
+
+// ─── Model Loading ───
+const fbxLoader = new FBXLoader();
+const objLoader = new OBJLoader();
+const mtlLoader = new MTLLoader();
+const textureLoader = new THREE.TextureLoader();
+
+function showLoading(text = 'Loading model...') {
+    document.getElementById('loading-text').textContent = text;
+    document.getElementById('loading').classList.remove('hidden');
+}
+
+function hideLoading() {
+    document.getElementById('loading').classList.add('hidden');
+}
+
+function detectModels() {
+    return Promise.all(state.modelConfigs.map((config, index) => {
+        return tryLoadModel(config.path, index);
+    }));
+}
+
+async function tryLoadModel(basePath, index) {
+    const extensions = ['fbx', 'obj'];
+    for (const ext of extensions) {
+        const names = ['model', 'scene', 'mesh', 'object'];
+        for (const name of names) {
+            const url = `${basePath}${name}.${ext}`;
+            try {
+                const model = await loadModelFromUrl(url, ext, basePath);
+                if (model) {
+                    state.modelConfigs[index].file = `${name}.${ext}`;
+                    return { model, index };
+                }
+            } catch(e) { /* try next */ }
+        }
+        const url = `${basePath}model${index+1}.${ext}`;
+        try {
+            const model = await loadModelFromUrl(url, ext, basePath);
+            if (model) {
+                state.modelConfigs[index].file = `model${index+1}.${ext}`;
+                return { model, index };
+            }
+        } catch(e) { /* try next */ }
+    }
+    return null;
+}
+
+function loadModelFromUrl(url, ext, basePath) {
+    return new Promise((resolve, reject) => {
+        if (ext === 'fbx') {
+            fbxLoader.load(url, resolve, undefined, reject);
+        } else if (ext === 'obj') {
+            const mtlUrl = url.replace('.obj', '.mtl');
+            mtlLoader.setPath(basePath);
+            mtlLoader.load(mtlUrl.replace(basePath, ''), (materials) => {
+                materials.preload();
+                const loader = new OBJLoader();
+                loader.setMaterials(materials);
+                loader.load(url, resolve, undefined, reject);
+            }, undefined, () => {
+                objLoader.load(url, resolve, undefined, reject);
+            });
+        } else {
+            reject(new Error('Unknown format'));
+        }
+    });
+}
+
+function loadModelFile(file, additionalFiles = []) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        const ext = file.name.split('.').pop().toLowerCase();
+
+        const textureMap = {};
+        additionalFiles.forEach(f => {
+            const fExt = f.name.split('.').pop().toLowerCase();
+            if (['jpg', 'jpeg', 'png', 'tga', 'bmp', 'tiff'].includes(fExt)) {
+                textureMap[f.name] = URL.createObjectURL(f);
+            }
+        });
+
+        if (ext === 'fbx') {
+            reader.onload = (e) => {
+                try {
+                    const loader = new FBXLoader();
+                    loader.manager = new THREE.LoadingManager();
+                    loader.manager.setURLModifier((url) => {
+                        const filename = url.split('/').pop().split('\\').pop();
+                        if (textureMap[filename]) return textureMap[filename];
+                        return url;
+                    });
+                    resolve(loader.parse(e.target.result));
+                } catch(err) { reject(err); }
+            };
+            reader.readAsArrayBuffer(file);
+        } else if (ext === 'obj') {
+            reader.onload = (e) => {
+                try {
+                    const loader = new OBJLoader();
+                    const mtlFile = additionalFiles.find(f => f.name.toLowerCase().endsWith('.mtl'));
+                    if (mtlFile) {
+                        const mtlReader = new FileReader();
+                        mtlReader.onload = (me) => {
+                            const ml = new MTLLoader();
+                            const materials = ml.parse(me.target.result, '');
+                            materials.preload();
+                            loader.setMaterials(materials);
+                            resolve(loader.parse(e.target.result));
+                        };
+                        mtlReader.readAsText(mtlFile);
+                    } else {
+                        resolve(loader.parse(e.target.result));
+                    }
+                } catch(err) { reject(err); }
+            };
+            reader.readAsText(file);
+        } else {
+            reject(new Error(`Unsupported format: .${ext}`));
+        }
+    });
+}
+
+function setupModel(object, index) {
+    const box = new THREE.Box3().setFromObject(object);
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const scale = 3 / maxDim;
+
+    object.scale.multiplyScalar(scale);
+    box.setFromObject(object);
+    box.getCenter(center);
+    object.position.sub(center);
+    object.position.y -= box.min.y * scale / maxDim;
+
+    object.traverse((child) => {
+        if (child.isMesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+            if (child.material) {
+                const mats = Array.isArray(child.material) ? child.material : [child.material];
+                mats.forEach(m => { if (m.map) m.map.colorSpace = THREE.SRGBColorSpace; });
+            }
+        }
+    });
+
+    state.originalMaterials.set(object, new Map());
+    object.traverse((child) => {
+        if (child.isMesh) {
+            state.originalMaterials.get(object).set(
+                child,
+                Array.isArray(child.material) ? child.material.map(m => m.clone()) : child.material.clone()
+            );
+        }
+    });
+
+    state.models[index] = object;
+
+    const btn = document.querySelector(`[data-model="${index}"]`);
+    if (btn) {
+        const name = state.modelConfigs[index].file || `Model ${index + 1}`;
+        btn.textContent = name.replace(/\.(fbx|obj)$/i, '');
+    }
+
+    return object;
+}
+
+function showModel(index) {
+    if (state.currentModel) {
+        scene.remove(state.currentModel);
+        clearOverlays();
+    }
+
+    state.currentModelIndex = index;
+    const model = state.models[index];
+    if (!model) return;
+
+    model.rotation.y = 0;
+    state.currentModel = model;
+    scene.add(model);
+
+    state.animations = model.animations || [];
+    setupAnimations(model);
+    updateStats(model);
+    applyRenderMode();
+    fitCamera(model);
+    drawUVMap();
+
+    document.querySelectorAll('.model-btn').forEach(btn => {
+        btn.classList.toggle('active', parseInt(btn.dataset.model) === index);
+    });
+}
+
+function fitCamera(object) {
+    const box = new THREE.Box3().setFromObject(object);
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const dist = maxDim * 1.8;
+
+    controls.target.copy(center);
+    camera.position.set(center.x + dist * 0.7, center.y + dist * 0.5, center.z + dist * 0.7);
+    controls.update();
+}
+
+// ─── Stats ───
+function updateStats(object) {
+    let triangles = 0, vertices = 0, meshCount = 0;
+    const materialSet = new Set();
+    const textureSet = new Set();
+
+    object.traverse((child) => {
+        if (child.isMesh) {
+            meshCount++;
+            const geo = child.geometry;
+            if (geo.index) triangles += geo.index.count / 3;
+            else if (geo.attributes.position) triangles += geo.attributes.position.count / 3;
+            if (geo.attributes.position) vertices += geo.attributes.position.count;
+
+            const mats = Array.isArray(child.material) ? child.material : [child.material];
+            mats.forEach(m => {
+                materialSet.add(m.uuid);
+                ['map','normalMap','roughnessMap','metalnessMap','emissiveMap','aoMap','alphaMap','specularMap'].forEach(prop => {
+                    if (m[prop]) textureSet.add(m[prop].uuid);
+                });
+            });
+        }
+    });
+
+    document.getElementById('stat-triangles').textContent = triangles.toLocaleString();
+    document.getElementById('stat-vertices').textContent = vertices.toLocaleString();
+    document.getElementById('stat-meshes').textContent = meshCount;
+    document.getElementById('stat-materials').textContent = materialSet.size;
+    document.getElementById('stat-textures').textContent = textureSet.size;
+}
+
+// ─── Animations ───
+function setupAnimations(model) {
+    if (state.mixer) { state.mixer.stopAllAction(); state.mixer = null; }
+    state.currentAction = null;
+    state.animPlaying = false;
+
+    const panel = document.getElementById('anim-panel');
+    const select = document.getElementById('anim-select');
+    select.innerHTML = '';
+
+    if (state.animations.length === 0) { panel.style.display = 'none'; return; }
+
+    panel.style.display = 'flex';
+    state.mixer = new THREE.AnimationMixer(model);
+
+    state.animations.forEach((clip, i) => {
+        const opt = document.createElement('option');
+        opt.value = i;
+        opt.textContent = clip.name || `Animation ${i + 1}`;
+        select.appendChild(opt);
+    });
+
+    playAnimation(0);
+}
+
+function playAnimation(index) {
+    if (!state.mixer || !state.animations[index]) return;
+    if (state.currentAction) state.currentAction.stop();
+    state.currentAction = state.mixer.clipAction(state.animations[index]);
+    state.currentAction.play();
+    state.animPlaying = true;
+    document.getElementById('anim-play').innerHTML = '&#9646;&#9646;';
+}
+
+document.getElementById('anim-select').addEventListener('change', (e) => playAnimation(parseInt(e.target.value)));
+
+document.getElementById('anim-play').addEventListener('click', () => {
+    if (!state.currentAction) return;
+    state.animPlaying = !state.animPlaying;
+    state.currentAction.paused = !state.animPlaying;
+    document.getElementById('anim-play').innerHTML = state.animPlaying ? '&#9646;&#9646;' : '&#9654;';
+});
+
+document.getElementById('anim-speed').addEventListener('input', (e) => {
+    const speed = parseFloat(e.target.value);
+    if (state.mixer) state.mixer.timeScale = speed;
+    document.getElementById('anim-speed-val').textContent = speed.toFixed(1) + 'x';
+});
+
+document.getElementById('anim-scrub').addEventListener('input', (e) => {
+    if (!state.currentAction) return;
+    const clip = state.currentAction.getClip();
+    state.currentAction.time = (e.target.value / 100) * clip.duration;
+    state.mixer.update(0);
+});
+
+// ─── 2D UV Map Drawing ───
+function drawUVMap() {
+    const canvas = document.getElementById('uv-canvas');
+    const ctx = canvas.getContext('2d');
+    const panel = document.getElementById('uv-panel');
+
+    canvas.width = panel.clientWidth || 800;
+    canvas.height = panel.clientHeight || 800;
+    const w = canvas.width;
+    const h = canvas.height;
+    const s = Math.min(w, h);
+    const ox = (w - s) / 2 + s * 0.05;
+    const oy = (h - s) / 2 + s * 0.05;
+    const drawSize = s * 0.9;
+
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = '#f0f0f0';
+    ctx.fillRect(0, 0, w, h);
+
+    // Draw checkerboard background in UV space
+    const cells = 8;
+    const cellSize = drawSize / cells;
+    for (let y = 0; y < cells; y++) {
+        for (let x = 0; x < cells; x++) {
+            ctx.fillStyle = (x + y) % 2 === 0 ? '#e4e4e4' : '#dcdcdc';
+            ctx.fillRect(ox + x * cellSize, oy + y * cellSize, cellSize, cellSize);
+        }
+    }
+
+    // UV space border
+    ctx.strokeStyle = '#999';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(ox, oy, drawSize, drawSize);
+
+    if (!state.currentModel) return;
+
+    // Collect UV edges from all meshes
+    const colors = ['#2563eb', '#dc2626', '#16a34a', '#d97706', '#7c3aed', '#db2777'];
+    let meshIdx = 0;
+
+    state.currentModel.traverse((child) => {
+        if (!child.isMesh) return;
+        const geo = child.geometry;
+        const uv = geo.attributes.uv;
+        if (!uv) return;
+
+        const idx = geo.index;
+        ctx.strokeStyle = colors[meshIdx % colors.length];
+        ctx.lineWidth = 1;
+        ctx.globalAlpha = 0.7;
+
+        if (idx) {
+            for (let i = 0; i < idx.count; i += 3) {
+                const a = idx.getX(i), b = idx.getX(i+1), c = idx.getX(i+2);
+                const ax = ox + uv.getX(a) * drawSize, ay = oy + (1 - uv.getY(a)) * drawSize;
+                const bx = ox + uv.getX(b) * drawSize, by = oy + (1 - uv.getY(b)) * drawSize;
+                const cx = ox + uv.getX(c) * drawSize, cy = oy + (1 - uv.getY(c)) * drawSize;
+                ctx.beginPath();
+                ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.lineTo(cx, cy); ctx.closePath();
+                ctx.stroke();
+            }
+        } else {
+            for (let i = 0; i < uv.count; i += 3) {
+                const ax = ox + uv.getX(i) * drawSize, ay = oy + (1 - uv.getY(i)) * drawSize;
+                const bx = ox + uv.getX(i+1) * drawSize, by = oy + (1 - uv.getY(i+1)) * drawSize;
+                const cx = ox + uv.getX(i+2) * drawSize, cy = oy + (1 - uv.getY(i+2)) * drawSize;
+                ctx.beginPath();
+                ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.lineTo(cx, cy); ctx.closePath();
+                ctx.stroke();
+            }
+        }
+
+        ctx.globalAlpha = 1;
+        meshIdx++;
+    });
+}
+
+function toggle2DView(show) {
+    state.show2D = show;
+    const panel = document.getElementById('uv-panel');
+    const statsPanel = document.getElementById('stats-panel');
+
+    if (show) {
+        panel.classList.add('open');
+        container.style.right = '50%';
+        statsPanel.style.right = 'calc(50% + 12px)';
+    } else {
+        panel.classList.remove('open');
+        container.style.right = '0';
+        statsPanel.style.right = '12px';
+    }
+
+    setTimeout(() => {
+        handleResize();
+        if (show) drawUVMap();
+    }, 320);
+}
+
+// ─── Render modes ───
+function clearOverlays() {
+    state.normalHelpers.forEach(h => {
+        h.parent?.remove(h);
+        h.dispose?.();
+    });
+    state.normalHelpers = [];
+    state.wireframeMeshes.forEach(m => {
+        m.parent?.remove(m);
+        m.geometry?.dispose();
+        m.material?.dispose();
+    });
+    state.wireframeMeshes = [];
+}
+
+function restoreOriginalMaterials() {
+    if (!state.currentModel) return;
+    const origMap = state.originalMaterials.get(state.currentModel);
+    if (!origMap) return;
+    state.currentModel.traverse((child) => {
+        if (child.isMesh && origMap.has(child)) {
+            const orig = origMap.get(child);
+            child.material = Array.isArray(orig) ? orig.map(m => m.clone()) : orig.clone();
+        }
+    });
+}
+
+function applyRenderMode() {
+    if (!state.currentModel) return;
+
+    clearOverlays();
+    restoreOriginalMaterials();
+
+    const model = state.currentModel;
+    const mode = state.renderMode;
+    const side = THREE.DoubleSide;
+
+    model.traverse((child) => {
+        if (!child.isMesh) return;
+        const origMats = state.originalMaterials.get(model)?.get(child);
+        if (!origMats) return;
+        const origArray = Array.isArray(origMats) ? origMats : [origMats];
+
+        switch (mode) {
+            case 'final': break;
+            case 'nopost': break;
+
+            case 'basecolor': {
+                child.material = origArray.map(m => {
+                    const mat = new THREE.MeshBasicMaterial({ color: m.color || 0xffffff, side });
+                    if (m.map) mat.map = m.map;
+                    return mat;
+                });
+                if (!Array.isArray(origMats)) child.material = child.material[0];
+                break;
+            }
+            case 'metalness': {
+                child.material = origArray.map(m => {
+                    if (m.metalnessMap) return new THREE.MeshBasicMaterial({ map: m.metalnessMap, side });
+                    const v = m.metalness !== undefined ? m.metalness : 0;
+                    return new THREE.MeshBasicMaterial({ color: new THREE.Color(v, v, v), side });
+                });
+                if (!Array.isArray(origMats)) child.material = child.material[0];
+                break;
+            }
+            case 'roughness': {
+                child.material = origArray.map(m => {
+                    if (m.roughnessMap) return new THREE.MeshBasicMaterial({ map: m.roughnessMap, side });
+                    const v = m.roughness !== undefined ? m.roughness : 1;
+                    return new THREE.MeshBasicMaterial({ color: new THREE.Color(v, v, v), side });
+                });
+                if (!Array.isArray(origMats)) child.material = child.material[0];
+                break;
+            }
+            case 'normal': {
+                child.material = origArray.map(m => {
+                    if (m.normalMap) return new THREE.MeshBasicMaterial({ map: m.normalMap, side });
+                    return new THREE.MeshNormalMaterial({ side });
+                });
+                if (!Array.isArray(origMats)) child.material = child.material[0];
+                break;
+            }
+            case 'opacity': {
+                child.material = origArray.map(m => {
+                    if (m.alphaMap) return new THREE.MeshBasicMaterial({ map: m.alphaMap, side });
+                    const v = m.opacity !== undefined ? m.opacity : 1;
+                    return new THREE.MeshBasicMaterial({ color: new THREE.Color(v, v, v), side });
+                });
+                if (!Array.isArray(origMats)) child.material = child.material[0];
+                break;
+            }
+            case 'emission': {
+                child.material = origArray.map(m => {
+                    const mat = new THREE.MeshBasicMaterial({ color: 0x000000, side });
+                    if (m.emissiveMap) mat.map = m.emissiveMap;
+                    else if (m.emissive) mat.color.copy(m.emissive);
+                    return mat;
+                });
+                if (!Array.isArray(origMats)) child.material = child.material[0];
+                break;
+            }
+            case 'matcap': {
+                child.material = new THREE.MeshMatcapMaterial({ matcap: matcapTexture, side });
+                break;
+            }
+            case 'matcap-surface': {
+                const origMat = Array.isArray(origMats) ? origMats[0] : origMats;
+                const mat = new THREE.MeshMatcapMaterial({ matcap: matcapTexture, side });
+                if (origMat.map) mat.map = origMat.map;
+                child.material = mat;
+                break;
+            }
+        }
+    });
+
+    if (state.wireframeOverlay) addWireframeOverlay();
+    if (state.vertexNormalsVisible) addVertexNormals();
+    if (state.uvCheckerVisible) applyUVChecker();
+
+    if (mode === 'nopost') {
+        renderer.toneMapping = THREE.NoToneMapping;
+        renderer.toneMappingExposure = 1.0;
+    } else if (mode === 'final') {
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.2;
+    } else {
+        renderer.toneMapping = THREE.NoToneMapping;
+    }
+}
+
+function addWireframeOverlay() {
+    if (!state.currentModel) return;
+    state.currentModel.traverse((child) => {
+        if (!child.isMesh) return;
+        const wireGeo = new THREE.WireframeGeometry(child.geometry);
+        const lineMat = new THREE.LineBasicMaterial({
+            color: state.wireframeColor,
+            linewidth: state.wireframeWidth,
+            depthTest: true,
+            transparent: true,
+            opacity: 0.6
+        });
+        const wireframe = new THREE.LineSegments(wireGeo, lineMat);
+        // Parent wireframe to the mesh so it inherits transforms and rotation
+        child.add(wireframe);
+        state.wireframeMeshes.push(wireframe);
+    });
+}
+
+function addVertexNormals() {
+    if (!state.currentModel) return;
+    state.currentModel.traverse((child) => {
+        if (!child.isMesh) return;
+        const helper = new VertexNormalsHelper(child, 0.05, 0x00aaff);
+        scene.add(helper);
+        state.normalHelpers.push(helper);
+    });
+}
+
+function applyUVChecker() {
+    if (!state.currentModel) return;
+    state.currentModel.traverse((child) => {
+        if (!child.isMesh) return;
+        const mats = Array.isArray(child.material) ? child.material : [child.material];
+        mats.forEach(m => { m.map = uvCheckerTexture; m.needsUpdate = true; });
+    });
+}
+
+// ─── Sidebar interaction ───
+const sidebarItems = document.querySelectorAll('.sidebar-item');
+const toggleModes = ['wireframe', 'vertexnormals', 'uvchecker', 'autorotate'];
+
+sidebarItems.forEach(item => {
+    item.addEventListener('click', () => {
+        const mode = item.dataset.mode;
+
+        if (toggleModes.includes(mode)) {
+            item.classList.toggle('active');
+            if (mode === 'wireframe') state.wireframeOverlay = item.classList.contains('active');
+            if (mode === 'vertexnormals') state.vertexNormalsVisible = item.classList.contains('active');
+            if (mode === 'uvchecker') state.uvCheckerVisible = item.classList.contains('active');
+            if (mode === 'autorotate') {
+                state.autoRotate = item.classList.contains('active');
+                document.getElementById('rotate-speed-row').style.display = state.autoRotate ? 'flex' : 'none';
+            }
+            applyRenderMode();
+            return;
+        }
+
+        sidebarItems.forEach(si => {
+            if (!toggleModes.includes(si.dataset.mode)) si.classList.remove('active');
+        });
+        item.classList.add('active');
+        state.renderMode = mode;
+        applyRenderMode();
+    });
+});
+
+// Wireframe colors
+document.querySelectorAll('.color-swatch').forEach(swatch => {
+    swatch.addEventListener('click', () => {
+        document.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('active'));
+        swatch.classList.add('active');
+        state.wireframeColor = swatch.dataset.color;
+        if (state.wireframeOverlay) applyRenderMode();
+    });
+});
+
+// Wireframe width
+document.getElementById('wireframe-width').addEventListener('input', (e) => {
+    state.wireframeWidth = parseFloat(e.target.value);
+    document.getElementById('wireframe-width-val').textContent = state.wireframeWidth;
+    if (state.wireframeOverlay) applyRenderMode();
+});
+
+// Viewport tabs
+document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        toggle2DView(btn.dataset.viewport === '2d');
+    });
+});
+
+// Model buttons
+document.querySelectorAll('.model-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        const idx = parseInt(btn.dataset.model);
+        if (state.models[idx]) showModel(idx);
+    });
+});
+
+// Sidebar collapse
+document.getElementById('sidebar-toggle').addEventListener('click', () => {
+    const sidebar = document.getElementById('sidebar');
+    const toggle = document.getElementById('sidebar-toggle');
+    const collapsed = sidebar.classList.toggle('collapsed');
+    document.body.classList.toggle('sidebar-collapsed', collapsed);
+    toggle.textContent = collapsed ? '▶' : '◀';
+});
+
+// Auto-rotate speed
+document.getElementById('rotate-speed').addEventListener('input', (e) => {
+    state.autoRotateSpeed = parseFloat(e.target.value);
+    document.getElementById('rotate-speed-val').textContent = state.autoRotateSpeed.toFixed(1);
+});
+
+// Help
+document.getElementById('help-btn').addEventListener('click', () => {
+    const tooltip = document.getElementById('help-tooltip');
+    tooltip.style.display = tooltip.style.display === 'block' ? 'none' : 'block';
+});
+
+// Keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+
+    switch (e.key) {
+        case '1': case '2': case '3': {
+            const idx = parseInt(e.key) - 1;
+            if (state.models[idx]) showModel(idx);
+            break;
+        }
+        case 'w': case 'W':
+            state.wireframeOverlay = !state.wireframeOverlay;
+            document.querySelector('[data-mode="wireframe"]').classList.toggle('active', state.wireframeOverlay);
+            applyRenderMode();
+            break;
+        case 'n': case 'N':
+            state.vertexNormalsVisible = !state.vertexNormalsVisible;
+            document.querySelector('[data-mode="vertexnormals"]').classList.toggle('active', state.vertexNormalsVisible);
+            applyRenderMode();
+            break;
+        case 'u': case 'U':
+            state.uvCheckerVisible = !state.uvCheckerVisible;
+            document.querySelector('[data-mode="uvchecker"]').classList.toggle('active', state.uvCheckerVisible);
+            applyRenderMode();
+            break;
+        case 'a': case 'A':
+            state.autoRotate = !state.autoRotate;
+            document.querySelector('[data-mode="autorotate"]').classList.toggle('active', state.autoRotate);
+            document.getElementById('rotate-speed-row').style.display = state.autoRotate ? 'flex' : 'none';
+            break;
+        case ' ':
+            e.preventDefault();
+            if (state.currentAction) {
+                state.animPlaying = !state.animPlaying;
+                state.currentAction.paused = !state.animPlaying;
+                document.getElementById('anim-play').innerHTML = state.animPlaying ? '&#9646;&#9646;' : '&#9654;';
+            }
+            break;
+        case 'r': case 'R':
+            if (state.currentModel) fitCamera(state.currentModel);
+            break;
+    }
+});
+
+// ─── Drag & Drop ───
+const dropZone = document.getElementById('drop-zone');
+
+document.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.style.display = 'flex'; });
+document.addEventListener('dragleave', (e) => { if (e.relatedTarget === null) dropZone.style.display = 'none'; });
+
+document.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    dropZone.style.display = 'none';
+    const files = Array.from(e.dataTransfer.files);
+    const modelFile = files.find(f => /\.(fbx|obj)$/i.test(f.name));
+    if (!modelFile) return;
+
+    showLoading(`Loading ${modelFile.name}...`);
+    try {
+        const object = await loadModelFile(modelFile, files);
+        const idx = state.currentModelIndex;
+        state.modelConfigs[idx].file = modelFile.name;
+        setupModel(object, idx);
+        showModel(idx);
+    } catch (err) {
+        console.error('Failed to load model:', err);
+        alert('Failed to load model: ' + err.message);
+    }
+    hideLoading();
+});
+
+// ─── Render loop ───
+function animate() {
+    requestAnimationFrame(animate);
+
+    const delta = state.clock.getDelta();
+
+    if (state.mixer && state.animPlaying) {
+        state.mixer.update(delta);
+        if (state.currentAction) {
+            const clip = state.currentAction.getClip();
+            const time = state.currentAction.time % clip.duration;
+            document.getElementById('anim-time').textContent = `${time.toFixed(2)} / ${clip.duration.toFixed(2)}s`;
+            document.getElementById('anim-scrub').value = (time / clip.duration) * 100;
+        }
+    }
+
+    if (state.autoRotate && state.currentModel) {
+        state.currentModel.rotation.y += delta * state.autoRotateSpeed;
+    }
+
+    state.normalHelpers.forEach(h => h.update());
+    controls.update();
+    renderer.render(scene, camera);
+}
+
+// ─── Resize ───
+function handleResize() {
+    const rect = container.getBoundingClientRect();
+    camera.aspect = rect.width / rect.height;
+    camera.updateProjectionMatrix();
+    renderer.setSize(rect.width, rect.height);
+    if (state.show2D) drawUVMap();
+}
+
+window.addEventListener('resize', handleResize);
+
+// ─── Init ───
+async function init() {
+    showLoading('Looking for models...');
+
+    const results = await detectModels();
+    const loaded = results.filter(r => r !== null);
+
+    if (loaded.length > 0) {
+        loaded.forEach(({ model, index }) => setupModel(model, index));
+        showModel(loaded[0].index);
+    } else {
+        createDemoModels();
+        showModel(0);
+    }
+
+    hideLoading();
+    animate();
+}
+
+function createDemoModels() {
+    const geo1 = new THREE.TorusKnotGeometry(0.8, 0.25, 128, 32);
+    const mat1 = new THREE.MeshStandardMaterial({ color: 0x4488ff, metalness: 0.3, roughness: 0.4 });
+    const mesh1 = new THREE.Mesh(geo1, mat1);
+    const group1 = new THREE.Group();
+    group1.add(mesh1);
+    group1.animations = [];
+    state.modelConfigs[0].file = 'Torus Knot';
+    setupModel(group1, 0);
+
+    const geo2 = new THREE.IcosahedronGeometry(1.2, 3);
+    const mat2 = new THREE.MeshStandardMaterial({ color: 0xff6644, metalness: 0.6, roughness: 0.2 });
+    const mesh2 = new THREE.Mesh(geo2, mat2);
+    const group2 = new THREE.Group();
+    group2.add(mesh2);
+    group2.animations = [];
+    state.modelConfigs[1].file = 'Icosphere';
+    setupModel(group2, 1);
+
+    const geo3 = new THREE.BoxGeometry(1.5, 1.5, 1.5, 4, 4, 4);
+    const mat3 = new THREE.MeshStandardMaterial({ color: 0x44dd88, metalness: 0.1, roughness: 0.7 });
+    const mesh3 = new THREE.Mesh(geo3, mat3);
+    const group3 = new THREE.Group();
+    group3.add(mesh3);
+    group3.animations = [];
+    state.modelConfigs[2].file = 'Cube';
+    setupModel(group3, 2);
+
+    document.querySelector('[data-model="0"]').textContent = 'Torus Knot';
+    document.querySelector('[data-model="1"]').textContent = 'Icosphere';
+    document.querySelector('[data-model="2"]').textContent = 'Cube';
+}
+
+init();
+</script>
+</body>
+</html>
