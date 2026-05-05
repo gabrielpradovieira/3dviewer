@@ -2,6 +2,22 @@
 
 Static Three.js model inspector for event presentations.
 
+## Local Testing
+
+Before committing and pushing, run the viewer locally from this folder:
+
+```text
+serve-local.bat
+```
+
+It starts a local server and opens:
+
+```text
+http://127.0.0.1:3000/
+```
+
+Keep the terminal window open while testing. Close it to stop the server.
+
 ## GitHub Pages
 
 This project can run directly from GitHub Pages. After committing and pushing:
