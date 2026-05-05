@@ -615,6 +615,10 @@
     <div class="divider"></div>
 
     <div class="section-label">Display</div>
+    <div class="sidebar-item active" data-mode="grid">
+        <div class="check-box"></div>
+        <span>Grid</span>
+    </div>
     <div class="sidebar-item" data-mode="autorotate">
         <div class="check-box"></div>
         <span>Auto-Rotate</span>
@@ -628,9 +632,9 @@
 
 <!-- Model switcher -->
 <div id="model-bar">
-    <button class="model-btn active" data-model="0">Model 1</button>
-    <button class="model-btn" data-model="1">Model 2</button>
-    <button class="model-btn" data-model="2">Model 3</button>
+    <button class="model-btn active" data-model="0">Hammer</button>
+    <button class="model-btn" data-model="1">Blade</button>
+    <button class="model-btn" data-model="2">Cargo Transporter</button>
 </div>
 
 <!-- Stats -->
@@ -674,9 +678,6 @@
     <p id="loading-text">Loading model...</p>
 </div>
 
-<!-- Drop zone -->
-<div id="drop-zone">Drop FBX / OBJ files here</div>
-
 <!-- Help -->
 <button id="help-btn">?</button>
 <div id="help-tooltip">
@@ -689,9 +690,10 @@
     <kbd>N</kbd> Toggle normals<br>
     <kbd>U</kbd> Toggle UV checker<br>
     <kbd>A</kbd> Toggle auto-rotate<br>
+    <kbd>G</kbd> Toggle grid<br>
     <kbd>Space</kbd> Play/Pause animation<br>
     <kbd>R</kbd> Reset camera<br>
-    Drag &amp; drop FBX/OBJ files to load
+    Use Model 1-3 to switch preset FBX files
 </div>
 
 <!-- Three.js and loaders from CDN -->
@@ -821,9 +823,9 @@ const uvCheckerTexture = createUVCheckerTexture();
 const state = {
     models: [null, null, null],
     modelConfigs: [
-        { path: 'models/model1/', file: null },
-        { path: 'models/model2/', file: null },
-        { path: 'models/model3/', file: null }
+        { path: 'models/model1/', file: 'Hammer.fbx', label: 'Hammer' },
+        { path: 'models/model2/', file: 'Blade.fbx', label: 'Blade' },
+        { path: 'models/model3/', file: 'Cargo_Transporter.fbx', label: 'Cargo Transporter' }
     ],
     currentModelIndex: 0,
     currentModel: null,
@@ -843,6 +845,7 @@ const state = {
     animPlaying: false,
     autoRotate: false,
     autoRotateSpeed: 2,
+    showGrid: true,
     show2D: false
 };
 
@@ -863,34 +866,20 @@ function hideLoading() {
 
 function detectModels() {
     return Promise.all(state.modelConfigs.map((config, index) => {
-        return tryLoadModel(config.path, index);
+        return tryLoadModel(config, index);
     }));
 }
 
-async function tryLoadModel(basePath, index) {
-    const extensions = ['fbx', 'obj'];
-    for (const ext of extensions) {
-        const names = ['model', 'scene', 'mesh', 'object'];
-        for (const name of names) {
-            const url = `${basePath}${name}.${ext}`;
-            try {
-                const model = await loadModelFromUrl(url, ext, basePath);
-                if (model) {
-                    state.modelConfigs[index].file = `${name}.${ext}`;
-                    return { model, index };
-                }
-            } catch(e) { /* try next */ }
-        }
-        const url = `${basePath}model${index+1}.${ext}`;
-        try {
-            const model = await loadModelFromUrl(url, ext, basePath);
-            if (model) {
-                state.modelConfigs[index].file = `model${index+1}.${ext}`;
-                return { model, index };
-            }
-        } catch(e) { /* try next */ }
+async function tryLoadModel(config, index) {
+    const ext = config.file.split('.').pop().toLowerCase();
+    const url = encodeURI(`${config.path}${config.file}`);
+    try {
+        const model = await loadModelFromUrl(url, ext, config.path);
+        return { model, index };
+    } catch(e) {
+        console.error(`Could not load preset model ${decodeURI(url)}:`, e);
+        return { error: e, index, url: decodeURI(url) };
     }
-    return null;
 }
 
 function loadModelFromUrl(url, ext, basePath) {
@@ -1006,8 +995,7 @@ function setupModel(object, index) {
 
     const btn = document.querySelector(`[data-model="${index}"]`);
     if (btn) {
-        const name = state.modelConfigs[index].file || `Model ${index + 1}`;
-        btn.textContent = name.replace(/\.(fbx|obj)$/i, '');
+        btn.textContent = state.modelConfigs[index].label || `Model ${index + 1}`;
     }
 
     return object;
@@ -1406,7 +1394,7 @@ function applyUVChecker() {
 
 // ─── Sidebar interaction ───
 const sidebarItems = document.querySelectorAll('.sidebar-item');
-const toggleModes = ['wireframe', 'vertexnormals', 'uvchecker', 'autorotate'];
+const toggleModes = ['wireframe', 'vertexnormals', 'uvchecker', 'grid', 'autorotate'];
 
 sidebarItems.forEach(item => {
     item.addEventListener('click', () => {
@@ -1417,6 +1405,10 @@ sidebarItems.forEach(item => {
             if (mode === 'wireframe') state.wireframeOverlay = item.classList.contains('active');
             if (mode === 'vertexnormals') state.vertexNormalsVisible = item.classList.contains('active');
             if (mode === 'uvchecker') state.uvCheckerVisible = item.classList.contains('active');
+            if (mode === 'grid') {
+                state.showGrid = item.classList.contains('active');
+                gridHelper.visible = state.showGrid;
+            }
             if (mode === 'autorotate') {
                 state.autoRotate = item.classList.contains('active');
                 document.getElementById('rotate-speed-row').style.display = state.autoRotate ? 'flex' : 'none';
@@ -1519,6 +1511,11 @@ document.addEventListener('keydown', (e) => {
             document.querySelector('[data-mode="autorotate"]').classList.toggle('active', state.autoRotate);
             document.getElementById('rotate-speed-row').style.display = state.autoRotate ? 'flex' : 'none';
             break;
+        case 'g': case 'G':
+            state.showGrid = !state.showGrid;
+            gridHelper.visible = state.showGrid;
+            document.querySelector('[data-mode="grid"]').classList.toggle('active', state.showGrid);
+            break;
         case ' ':
             e.preventDefault();
             if (state.currentAction) {
@@ -1531,33 +1528,6 @@ document.addEventListener('keydown', (e) => {
             if (state.currentModel) fitCamera(state.currentModel);
             break;
     }
-});
-
-// ─── Drag & Drop ───
-const dropZone = document.getElementById('drop-zone');
-
-document.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.style.display = 'flex'; });
-document.addEventListener('dragleave', (e) => { if (e.relatedTarget === null) dropZone.style.display = 'none'; });
-
-document.addEventListener('drop', async (e) => {
-    e.preventDefault();
-    dropZone.style.display = 'none';
-    const files = Array.from(e.dataTransfer.files);
-    const modelFile = files.find(f => /\.(fbx|obj)$/i.test(f.name));
-    if (!modelFile) return;
-
-    showLoading(`Loading ${modelFile.name}...`);
-    try {
-        const object = await loadModelFile(modelFile, files);
-        const idx = state.currentModelIndex;
-        state.modelConfigs[idx].file = modelFile.name;
-        setupModel(object, idx);
-        showModel(idx);
-    } catch (err) {
-        console.error('Failed to load model:', err);
-        alert('Failed to load model: ' + err.message);
-    }
-    hideLoading();
 });
 
 // ─── Render loop ───
@@ -1600,15 +1570,30 @@ window.addEventListener('resize', handleResize);
 async function init() {
     showLoading('Looking for models...');
 
+    if (window.location.protocol === 'file:') {
+        document.getElementById('loading-text').textContent = 'Run this through a local server. Do not open index.html directly.';
+        console.error('Preset models cannot be loaded from file://. Start a local HTTP server from the 3dviewer folder.');
+        animate();
+        return;
+    }
+
     const results = await detectModels();
-    const loaded = results.filter(r => r !== null);
+    const loaded = results.filter(r => r && r.model);
 
     if (loaded.length > 0) {
         loaded.forEach(({ model, index }) => setupModel(model, index));
         showModel(loaded[0].index);
     } else {
-        createDemoModels();
-        showModel(0);
+        const failedPaths = results
+            .filter(r => r && r.error)
+            .map(r => r.url)
+            .join(', ');
+        console.error('No preset FBX models loaded. Failed paths:', failedPaths);
+        document.getElementById('loading-text').textContent = failedPaths
+            ? `Could not load presets: ${failedPaths}`
+            : 'No preset models found.';
+        animate();
+        return;
     }
 
     hideLoading();
