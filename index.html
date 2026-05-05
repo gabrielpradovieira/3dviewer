@@ -44,7 +44,11 @@
         #uv-panel canvas {
             width: 100%;
             height: 100%;
+            cursor: grab;
+            touch-action: none;
         }
+
+        #uv-panel canvas:active { cursor: grabbing; }
 
         #uv-panel-label {
             position: absolute;
@@ -623,6 +627,10 @@
         <div class="check-box"></div>
         <span>Auto-Rotate</span>
     </div>
+    <div class="sidebar-item" data-mode="autodisplay">
+        <div class="check-box"></div>
+        <span>Auto Display</span>
+    </div>
     <div class="slider-row" id="rotate-speed-row" style="display:none">
         <label>Speed</label>
         <input type="range" id="rotate-speed" min="0.1" max="5" step="0.1" value="2">
@@ -635,6 +643,7 @@
     <button class="model-btn active" data-model="0">Hammer</button>
     <button class="model-btn" data-model="1">Blade</button>
     <button class="model-btn" data-model="2">Cargo Transporter</button>
+    <button class="model-btn" data-model="3">Fiesta Tea</button>
 </div>
 
 <!-- Stats -->
@@ -690,10 +699,11 @@
     <kbd>N</kbd> Toggle normals<br>
     <kbd>U</kbd> Toggle UV checker<br>
     <kbd>A</kbd> Toggle auto-rotate<br>
+    <kbd>D</kbd> Toggle auto display<br>
     <kbd>G</kbd> Toggle grid<br>
     <kbd>Space</kbd> Play/Pause animation<br>
     <kbd>R</kbd> Reset camera<br>
-    Use Model 1-3 to switch preset FBX files
+    Use Model 1-4 to switch preset models
 </div>
 
 <!-- Three.js and loaders from CDN -->
@@ -709,6 +719,7 @@
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
@@ -821,11 +832,25 @@ const uvCheckerTexture = createUVCheckerTexture();
 
 // ─── State ───
 const state = {
-    models: [null, null, null],
+    models: [null, null, null, null],
     modelConfigs: [
-        { path: 'models/model1/', file: 'Hammer.fbx', label: 'Hammer' },
-        { path: 'models/model2/', file: 'Blade.fbx', label: 'Blade' },
-        { path: 'models/model3/', file: 'Cargo_Transporter.fbx', label: 'Cargo Transporter' }
+        { path: 'models/model1/', file: 'Hammer.fbx', label: 'Hammer', rotateAxis: 'y' },
+        { path: 'models/model2/', file: 'Blade.fbx', label: 'Blade', rotateAxis: 'y' },
+        { path: 'models/model3/', file: 'Cargo_Transporter.fbx', label: 'Cargo Transporter', rotateAxis: 'y' },
+        {
+            path: 'models/model4/',
+            file: 'fiesta_tea.glb',
+            label: 'Fiesta Tea',
+            rotateAxis: 'y',
+            useOriginalMaterials: true,
+            removeMeshes: ['Object_12', 'Object_28'],
+            removeMaterials: ['peripheri_Base_Color'],
+            useEmbeddedOpacity: true,
+            alphaCutoffs: {
+                trad_edges: 0.32,
+                'table_Base_Color.002': 0.46
+            }
+        }
     ],
     currentModelIndex: 0,
     currentModel: null,
@@ -838,6 +863,7 @@ const state = {
     uvCheckerVisible: false,
     normalHelpers: [],
     wireframeMeshes: [],
+    uvLayoutImages: new WeakMap(),
     mixer: null,
     currentAction: null,
     animations: [],
@@ -845,12 +871,26 @@ const state = {
     animPlaying: false,
     autoRotate: false,
     autoRotateSpeed: 2,
+    autoDisplay: false,
+    autoDisplayElapsed: 0,
+    autoDisplayInterval: 15,
     showGrid: true,
-    show2D: false
+    show2D: false,
+    uvView: {
+        scale: 1,
+        offsetX: 0,
+        offsetY: 0,
+        isDragging: false,
+        lastX: 0,
+        lastY: 0,
+        activePointers: new Map(),
+        lastPinchDistance: 0
+    }
 };
 
 // ─── Model Loading ───
 const fbxLoader = new FBXLoader();
+const gltfLoader = new GLTFLoader();
 const objLoader = new OBJLoader();
 const mtlLoader = new MTLLoader();
 const textureLoader = new THREE.TextureLoader();
@@ -860,6 +900,18 @@ const standardGreyMaterial = new THREE.MeshStandardMaterial({
     metalness: 0.0,
     side: THREE.DoubleSide
 });
+
+function applyEmbeddedOpacity(material, alphaCutoff) {
+    if (!material) return material;
+    material.side = THREE.DoubleSide;
+    if (material.alphaMap || material.map?.image) {
+        material.transparent = false;
+        material.depthWrite = true;
+        material.alphaTest = alphaCutoff ?? material.alphaTest ?? 0;
+    }
+    material.needsUpdate = true;
+    return material;
+}
 
 function showLoading(text = 'Loading model...') {
     document.getElementById('loading-text').textContent = text;
@@ -890,7 +942,13 @@ async function tryLoadModel(config, index) {
 
 function loadModelFromUrl(url, ext, basePath) {
     return new Promise((resolve, reject) => {
-        if (ext === 'fbx') {
+        if (ext === 'glb' || ext === 'gltf') {
+            gltfLoader.load(url, (gltf) => {
+                const object = gltf.scene;
+                object.animations = gltf.animations || [];
+                resolve(object);
+            }, undefined, reject);
+        } else if (ext === 'fbx') {
             fbxLoader.load(url, resolve, undefined, reject);
         } else if (ext === 'obj') {
             const mtlUrl = url.replace('.obj', '.mtl');
@@ -963,18 +1021,54 @@ function loadModelFile(file, additionalFiles = []) {
     });
 }
 
-function setupModel(object, index) {
-    const box = new THREE.Box3().setFromObject(object);
+function removeConfiguredMeshes(root, config) {
+    const names = new Set(config.removeMeshes || []);
+    const materials = new Set(config.removeMaterials || []);
+    if (!names.size && !materials.size) return;
+
+    const toRemove = [];
+    root.traverse((child) => {
+        const meshName = child.isMesh ? child.name : '';
+        const geometryName = child.geometry?.name || '';
+        const mats = Array.isArray(child.material) ? child.material : [child.material];
+        const hasRemovedMaterial = mats.some((mat) => materials.has(mat?.name));
+        if (child.isMesh && (names.has(meshName) || names.has(geometryName) || hasRemovedMaterial)) {
+            toRemove.push(child);
+        }
+    });
+
+    toRemove.forEach((child) => {
+        child.parent?.remove(child);
+        child.geometry?.dispose?.();
+        const mats = Array.isArray(child.material) ? child.material : [child.material];
+        mats.forEach((mat) => mat?.dispose?.());
+    });
+}
+
+function setupModel(loadedObject, index) {
+    const config = state.modelConfigs[index];
+    removeConfiguredMeshes(loadedObject, config);
+    loadedObject.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(loadedObject);
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.y, size.z);
-    const scale = 3 / maxDim;
+    const scale = maxDim > 0 ? 3 / maxDim : 1;
 
-    object.scale.multiplyScalar(scale);
-    box.setFromObject(object);
-    box.getCenter(center);
-    object.position.sub(center);
-    object.position.y -= box.min.y * scale / maxDim;
+    const object = new THREE.Group();
+    object.name = config.label || loadedObject.name || `Model ${index + 1}`;
+    object.animations = loadedObject.animations || [];
+    object.add(loadedObject);
+
+    loadedObject.scale.multiplyScalar(scale);
+    loadedObject.updateMatrixWorld(true);
+
+    const scaledBox = new THREE.Box3().setFromObject(loadedObject);
+    const scaledCenter = scaledBox.getCenter(new THREE.Vector3());
+    loadedObject.position.x -= scaledCenter.x;
+    loadedObject.position.z -= scaledCenter.z;
+    loadedObject.position.y -= scaledBox.min.y;
+    loadedObject.updateMatrixWorld(true);
 
     object.traverse((child) => {
         if (child.isMesh) {
@@ -989,20 +1083,27 @@ function setupModel(object, index) {
             const sourceMaterials = child.material
                 ? (Array.isArray(child.material) ? child.material : [child.material])
                 : [standardGreyMaterial];
-
             sourceMaterials.forEach(m => {
                 if (m.map) m.map.colorSpace = THREE.SRGBColorSpace;
+                if (config.useEmbeddedOpacity) applyEmbeddedOpacity(m, config.alphaCutoffs?.[m.name]);
             });
 
-            const standardMaterials = sourceMaterials.map(() => standardGreyMaterial.clone());
+            const useOriginalMaterials = Boolean(config.useOriginalMaterials);
+            const displayMaterials = useOriginalMaterials
+                ? sourceMaterials.map(m => {
+                    const clone = m.clone();
+                    if (config.useEmbeddedOpacity) applyEmbeddedOpacity(clone, config.alphaCutoffs?.[clone.name]);
+                    return clone;
+                })
+                : sourceMaterials.map(() => standardGreyMaterial.clone());
             state.originalMaterials.get(object).set(
                 child,
                 {
-                    display: Array.isArray(child.material) ? standardMaterials : standardMaterials[0],
+                    display: Array.isArray(child.material) ? displayMaterials : displayMaterials[0],
                     source: Array.isArray(child.material) ? sourceMaterials.map(m => m.clone()) : sourceMaterials[0].clone()
                 }
             );
-            child.material = Array.isArray(child.material) ? standardMaterials : standardMaterials[0];
+            child.material = Array.isArray(child.material) ? displayMaterials : displayMaterials[0];
         }
     });
 
@@ -1026,7 +1127,8 @@ function showModel(index) {
     const model = state.models[index];
     if (!model) return;
 
-    model.rotation.y = 0;
+    model.rotation.set(0, 0, 0);
+    state.autoDisplayElapsed = 0;
     state.currentModel = model;
     scene.add(model);
 
@@ -1043,14 +1145,21 @@ function showModel(index) {
 }
 
 function fitCamera(object) {
+    object.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(object);
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.y, size.z);
-    const dist = maxDim * 1.8;
+    const radius = size.length() * 0.5;
+    const fov = THREE.MathUtils.degToRad(camera.fov);
+    const fitHeightDistance = radius / Math.sin(fov / 2);
+    const dist = Math.max(fitHeightDistance * 0.92, maxDim * 1.08);
 
     controls.target.copy(center);
-    camera.position.set(center.x + dist * 0.7, center.y + dist * 0.5, center.z + dist * 0.7);
+    camera.position.set(center.x + dist * 0.58, center.y + dist * 0.34, center.z + dist * 0.58);
+    camera.near = Math.max(dist / 100, 0.01);
+    camera.far = dist * 100;
+    camera.updateProjectionMatrix();
     controls.update();
 }
 
@@ -1068,10 +1177,13 @@ function updateStats(object) {
             else if (geo.attributes.position) triangles += geo.attributes.position.count / 3;
             if (geo.attributes.position) vertices += geo.attributes.position.count;
 
-            const mats = Array.isArray(child.material) ? child.material : [child.material];
+            const materialRecord = state.originalMaterials.get(object)?.get(child);
+            const sourceMats = materialRecord?.source ?? child.material;
+            const mats = Array.isArray(sourceMats) ? sourceMats : [sourceMats];
             mats.forEach(m => {
+                if (!m) return;
                 materialSet.add(m.uuid);
-                ['map','normalMap','roughnessMap','metalnessMap','emissiveMap','aoMap','alphaMap','specularMap'].forEach(prop => {
+                ['map','normalMap','roughnessMap','metalnessMap','emissiveMap','aoMap','alphaMap','specularMap','bumpMap','displacementMap'].forEach(prop => {
                     if (m[prop]) textureSet.add(m[prop].uuid);
                 });
             });
@@ -1146,23 +1258,58 @@ function drawUVMap() {
     const canvas = document.getElementById('uv-canvas');
     const ctx = canvas.getContext('2d');
     const panel = document.getElementById('uv-panel');
+    const view = state.uvView;
 
     canvas.width = panel.clientWidth || 800;
     canvas.height = panel.clientHeight || 800;
     const w = canvas.width;
     const h = canvas.height;
-    const s = Math.min(w, h);
-    const ox = (w - s) / 2 + s * 0.05;
-    const oy = (h - s) / 2 + s * 0.05;
-    const drawSize = s * 0.9;
 
     ctx.clearRect(0, 0, w, h);
     ctx.fillStyle = '#f0f0f0';
     ctx.fillRect(0, 0, w, h);
 
+    const image = getUVLayoutImage(state.currentModel);
+    if (!image) return;
+
+    const drawSize = Math.min(w, h) * 0.9;
+    const ox = (w - drawSize) / 2;
+    const oy = (h - drawSize) / 2;
+
+    ctx.save();
+    ctx.translate(w / 2 + view.offsetX, h / 2 + view.offsetY);
+    ctx.scale(view.scale, view.scale);
+    ctx.translate(-w / 2, -h / 2);
+    ctx.drawImage(image, ox, oy, drawSize, drawSize);
+    ctx.restore();
+}
+
+function getUVLayoutImage(model) {
+    if (!model) return null;
+    if (state.uvLayoutImages.has(model)) return state.uvLayoutImages.get(model);
+
+    const image = createUVLayoutImage(model);
+    state.uvLayoutImages.set(model, image);
+    return image;
+}
+
+function createUVLayoutImage(model) {
+    const size = 1400;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+
     // Draw checkerboard background in UV space
     const cells = 8;
+    const margin = size * 0.05;
+    const drawSize = size - margin * 2;
+    const ox = margin;
+    const oy = margin;
     const cellSize = drawSize / cells;
+    ctx.fillStyle = '#f0f0f0';
+    ctx.fillRect(0, 0, size, size);
+
     for (let y = 0; y < cells; y++) {
         for (let x = 0; x < cells; x++) {
             ctx.fillStyle = (x + y) % 2 === 0 ? '#e4e4e4' : '#dcdcdc';
@@ -1175,13 +1322,11 @@ function drawUVMap() {
     ctx.lineWidth = 2;
     ctx.strokeRect(ox, oy, drawSize, drawSize);
 
-    if (!state.currentModel) return;
-
     // Collect UV edges from all meshes
     const colors = ['#2563eb', '#dc2626', '#16a34a', '#d97706', '#7c3aed', '#db2777'];
     let meshIdx = 0;
 
-    state.currentModel.traverse((child) => {
+    model.traverse((child) => {
         if (!child.isMesh) return;
         const geo = child.geometry;
         const uv = geo.attributes.uv;
@@ -1216,6 +1361,37 @@ function drawUVMap() {
         ctx.globalAlpha = 1;
         meshIdx++;
     });
+
+    const img = new Image();
+    img.src = canvas.toDataURL('image/jpeg', 0.82);
+    return img;
+}
+
+function clampUVView() {
+    state.uvView.scale = Math.min(8, Math.max(0.35, state.uvView.scale));
+}
+
+function zoomUVView(factor, clientX, clientY) {
+    const canvas = document.getElementById('uv-canvas');
+    const rect = canvas.getBoundingClientRect();
+    const view = state.uvView;
+    const beforeScale = view.scale;
+    const x = clientX - rect.left - rect.width / 2;
+    const y = clientY - rect.top - rect.height / 2;
+
+    view.scale *= factor;
+    clampUVView();
+    const ratio = view.scale / beforeScale;
+    view.offsetX = x - (x - view.offsetX) * ratio;
+    view.offsetY = y - (y - view.offsetY) * ratio;
+    drawUVMap();
+}
+
+function resetUVView() {
+    state.uvView.scale = 1;
+    state.uvView.offsetX = 0;
+    state.uvView.offsetY = 0;
+    drawUVMap();
 }
 
 function toggle2DView(show) {
@@ -1240,6 +1416,80 @@ function toggle2DView(show) {
 }
 
 // ─── Render modes ───
+function getPointerDistance(points) {
+    if (points.length < 2) return 0;
+    const dx = points[0].clientX - points[1].clientX;
+    const dy = points[0].clientY - points[1].clientY;
+    return Math.hypot(dx, dy);
+}
+
+function getPointerCenter(points) {
+    return {
+        clientX: points.reduce((sum, p) => sum + p.clientX, 0) / points.length,
+        clientY: points.reduce((sum, p) => sum + p.clientY, 0) / points.length
+    };
+}
+
+function setupUVControls() {
+    const canvas = document.getElementById('uv-canvas');
+    const view = state.uvView;
+
+    canvas.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        zoomUVView(e.deltaY < 0 ? 1.12 : 0.88, e.clientX, e.clientY);
+    }, { passive: false });
+
+    canvas.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        canvas.setPointerCapture(e.pointerId);
+        view.activePointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
+        view.isDragging = true;
+        view.lastX = e.clientX;
+        view.lastY = e.clientY;
+        view.lastPinchDistance = getPointerDistance(Array.from(view.activePointers.values()));
+    });
+
+    canvas.addEventListener('pointermove', (e) => {
+        if (!view.activePointers.has(e.pointerId)) return;
+        e.preventDefault();
+        view.activePointers.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
+        const points = Array.from(view.activePointers.values());
+
+        if (points.length >= 2) {
+            const distance = getPointerDistance(points);
+            const center = getPointerCenter(points);
+            if (view.lastPinchDistance > 0 && distance > 0) {
+                zoomUVView(distance / view.lastPinchDistance, center.clientX, center.clientY);
+            }
+            view.lastPinchDistance = distance;
+            return;
+        }
+
+        if (view.isDragging) {
+            view.offsetX += e.clientX - view.lastX;
+            view.offsetY += e.clientY - view.lastY;
+            view.lastX = e.clientX;
+            view.lastY = e.clientY;
+            drawUVMap();
+        }
+    });
+
+    ['pointerup', 'pointercancel', 'pointerleave'].forEach(type => {
+        canvas.addEventListener(type, (e) => {
+            view.activePointers.delete(e.pointerId);
+            view.isDragging = view.activePointers.size > 0;
+            const points = Array.from(view.activePointers.values());
+            view.lastPinchDistance = getPointerDistance(points);
+            if (points.length === 1) {
+                view.lastX = points[0].clientX;
+                view.lastY = points[0].clientY;
+            }
+        });
+    });
+
+    canvas.addEventListener('dblclick', resetUVView);
+}
+
 function clearOverlays() {
     state.normalHelpers.forEach(h => {
         h.parent?.remove(h);
@@ -1411,7 +1661,7 @@ function applyUVChecker() {
 
 // ─── Sidebar interaction ───
 const sidebarItems = document.querySelectorAll('.sidebar-item');
-const toggleModes = ['wireframe', 'vertexnormals', 'uvchecker', 'grid', 'autorotate'];
+const toggleModes = ['wireframe', 'vertexnormals', 'uvchecker', 'grid', 'autorotate', 'autodisplay'];
 
 sidebarItems.forEach(item => {
     item.addEventListener('click', () => {
@@ -1428,7 +1678,11 @@ sidebarItems.forEach(item => {
             }
             if (mode === 'autorotate') {
                 state.autoRotate = item.classList.contains('active');
-                document.getElementById('rotate-speed-row').style.display = state.autoRotate ? 'flex' : 'none';
+                if (!state.autoRotate) setAutoDisplay(false);
+                updateAutoRotateUI();
+            }
+            if (mode === 'autodisplay') {
+                setAutoDisplay(item.classList.contains('active'));
             }
             applyRenderMode();
             return;
@@ -1477,6 +1731,36 @@ document.querySelectorAll('.model-btn').forEach(btn => {
     });
 });
 
+function updateAutoRotateUI() {
+    document.querySelector('[data-mode="autorotate"]').classList.toggle('active', state.autoRotate);
+    document.getElementById('rotate-speed-row').style.display = state.autoRotate ? 'flex' : 'none';
+    document.getElementById('rotate-speed').value = state.autoRotateSpeed;
+    document.getElementById('rotate-speed-val').textContent = state.autoRotateSpeed.toFixed(1);
+    document.getElementById('rotate-speed').disabled = state.autoDisplay;
+}
+
+function setAutoDisplay(enabled) {
+    state.autoDisplay = enabled;
+    state.autoDisplayElapsed = 0;
+    document.querySelector('[data-mode="autodisplay"]').classList.toggle('active', enabled);
+
+    if (enabled) {
+        state.autoRotate = true;
+        state.autoRotateSpeed = 0.1;
+        updateAutoRotateUI();
+    }
+}
+
+function showNextAutoDisplayModel() {
+    for (let i = 1; i <= state.models.length; i++) {
+        const nextIndex = (state.currentModelIndex + i) % state.models.length;
+        if (state.models[nextIndex]) {
+            showModel(nextIndex);
+            return;
+        }
+    }
+}
+
 // Sidebar collapse
 document.getElementById('sidebar-toggle').addEventListener('click', () => {
     const sidebar = document.getElementById('sidebar');
@@ -1488,6 +1772,10 @@ document.getElementById('sidebar-toggle').addEventListener('click', () => {
 
 // Auto-rotate speed
 document.getElementById('rotate-speed').addEventListener('input', (e) => {
+    if (state.autoDisplay) {
+        e.target.value = state.autoRotateSpeed;
+        return;
+    }
     state.autoRotateSpeed = parseFloat(e.target.value);
     document.getElementById('rotate-speed-val').textContent = state.autoRotateSpeed.toFixed(1);
 });
@@ -1525,8 +1813,11 @@ document.addEventListener('keydown', (e) => {
             break;
         case 'a': case 'A':
             state.autoRotate = !state.autoRotate;
-            document.querySelector('[data-mode="autorotate"]').classList.toggle('active', state.autoRotate);
-            document.getElementById('rotate-speed-row').style.display = state.autoRotate ? 'flex' : 'none';
+            if (!state.autoRotate) setAutoDisplay(false);
+            updateAutoRotateUI();
+            break;
+        case 'd': case 'D':
+            setAutoDisplay(!state.autoDisplay);
             break;
         case 'g': case 'G':
             state.showGrid = !state.showGrid;
@@ -1564,7 +1855,16 @@ function animate() {
     }
 
     if (state.autoRotate && state.currentModel) {
-        state.currentModel.rotation.y += delta * state.autoRotateSpeed;
+        const axis = state.modelConfigs[state.currentModelIndex]?.rotateAxis || 'y';
+        state.currentModel.rotation[axis] += delta * state.autoRotateSpeed;
+    }
+
+    if (state.autoDisplay) {
+        state.autoDisplayElapsed += delta;
+        if (state.autoDisplayElapsed >= state.autoDisplayInterval) {
+            state.autoDisplayElapsed = 0;
+            showNextAutoDisplayModel();
+        }
     }
 
     state.normalHelpers.forEach(h => h.update());
@@ -1582,6 +1882,7 @@ function handleResize() {
 }
 
 window.addEventListener('resize', handleResize);
+setupUVControls();
 
 // ─── Init ───
 async function init() {
