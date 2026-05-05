@@ -854,6 +854,12 @@ const fbxLoader = new FBXLoader();
 const objLoader = new OBJLoader();
 const mtlLoader = new MTLLoader();
 const textureLoader = new THREE.TextureLoader();
+const standardGreyMaterial = new THREE.MeshStandardMaterial({
+    color: 0xd6d6d2,
+    roughness: 0.65,
+    metalness: 0.0,
+    side: THREE.DoubleSide
+});
 
 function showLoading(text = 'Loading model...') {
     document.getElementById('loading-text').textContent = text;
@@ -974,20 +980,29 @@ function setupModel(object, index) {
         if (child.isMesh) {
             child.castShadow = true;
             child.receiveShadow = true;
-            if (child.material) {
-                const mats = Array.isArray(child.material) ? child.material : [child.material];
-                mats.forEach(m => { if (m.map) m.map.colorSpace = THREE.SRGBColorSpace; });
-            }
         }
     });
 
     state.originalMaterials.set(object, new Map());
     object.traverse((child) => {
         if (child.isMesh) {
+            const sourceMaterials = child.material
+                ? (Array.isArray(child.material) ? child.material : [child.material])
+                : [standardGreyMaterial];
+
+            sourceMaterials.forEach(m => {
+                if (m.map) m.map.colorSpace = THREE.SRGBColorSpace;
+            });
+
+            const standardMaterials = sourceMaterials.map(() => standardGreyMaterial.clone());
             state.originalMaterials.get(object).set(
                 child,
-                Array.isArray(child.material) ? child.material.map(m => m.clone()) : child.material.clone()
+                {
+                    display: Array.isArray(child.material) ? standardMaterials : standardMaterials[0],
+                    source: Array.isArray(child.material) ? sourceMaterials.map(m => m.clone()) : sourceMaterials[0].clone()
+                }
             );
+            child.material = Array.isArray(child.material) ? standardMaterials : standardMaterials[0];
         }
     });
 
@@ -1246,7 +1261,8 @@ function restoreOriginalMaterials() {
     state.currentModel.traverse((child) => {
         if (child.isMesh && origMap.has(child)) {
             const orig = origMap.get(child);
-            child.material = Array.isArray(orig) ? orig.map(m => m.clone()) : orig.clone();
+            const display = orig.display ?? orig;
+            child.material = Array.isArray(display) ? display.map(m => m.clone()) : display.clone();
         }
     });
 }
@@ -1263,66 +1279,67 @@ function applyRenderMode() {
 
     model.traverse((child) => {
         if (!child.isMesh) return;
-        const origMats = state.originalMaterials.get(model)?.get(child);
-        if (!origMats) return;
-        const origArray = Array.isArray(origMats) ? origMats : [origMats];
+        const materialRecord = state.originalMaterials.get(model)?.get(child);
+        if (!materialRecord) return;
+        const sourceMats = materialRecord.source ?? materialRecord;
+        const sourceArray = Array.isArray(sourceMats) ? sourceMats : [sourceMats];
 
         switch (mode) {
             case 'final': break;
             case 'nopost': break;
 
             case 'basecolor': {
-                child.material = origArray.map(m => {
+                child.material = sourceArray.map(m => {
                     const mat = new THREE.MeshBasicMaterial({ color: m.color || 0xffffff, side });
                     if (m.map) mat.map = m.map;
                     return mat;
                 });
-                if (!Array.isArray(origMats)) child.material = child.material[0];
+                if (!Array.isArray(sourceMats)) child.material = child.material[0];
                 break;
             }
             case 'metalness': {
-                child.material = origArray.map(m => {
+                child.material = sourceArray.map(m => {
                     if (m.metalnessMap) return new THREE.MeshBasicMaterial({ map: m.metalnessMap, side });
                     const v = m.metalness !== undefined ? m.metalness : 0;
                     return new THREE.MeshBasicMaterial({ color: new THREE.Color(v, v, v), side });
                 });
-                if (!Array.isArray(origMats)) child.material = child.material[0];
+                if (!Array.isArray(sourceMats)) child.material = child.material[0];
                 break;
             }
             case 'roughness': {
-                child.material = origArray.map(m => {
+                child.material = sourceArray.map(m => {
                     if (m.roughnessMap) return new THREE.MeshBasicMaterial({ map: m.roughnessMap, side });
                     const v = m.roughness !== undefined ? m.roughness : 1;
                     return new THREE.MeshBasicMaterial({ color: new THREE.Color(v, v, v), side });
                 });
-                if (!Array.isArray(origMats)) child.material = child.material[0];
+                if (!Array.isArray(sourceMats)) child.material = child.material[0];
                 break;
             }
             case 'normal': {
-                child.material = origArray.map(m => {
+                child.material = sourceArray.map(m => {
                     if (m.normalMap) return new THREE.MeshBasicMaterial({ map: m.normalMap, side });
                     return new THREE.MeshNormalMaterial({ side });
                 });
-                if (!Array.isArray(origMats)) child.material = child.material[0];
+                if (!Array.isArray(sourceMats)) child.material = child.material[0];
                 break;
             }
             case 'opacity': {
-                child.material = origArray.map(m => {
+                child.material = sourceArray.map(m => {
                     if (m.alphaMap) return new THREE.MeshBasicMaterial({ map: m.alphaMap, side });
                     const v = m.opacity !== undefined ? m.opacity : 1;
                     return new THREE.MeshBasicMaterial({ color: new THREE.Color(v, v, v), side });
                 });
-                if (!Array.isArray(origMats)) child.material = child.material[0];
+                if (!Array.isArray(sourceMats)) child.material = child.material[0];
                 break;
             }
             case 'emission': {
-                child.material = origArray.map(m => {
+                child.material = sourceArray.map(m => {
                     const mat = new THREE.MeshBasicMaterial({ color: 0x000000, side });
                     if (m.emissiveMap) mat.map = m.emissiveMap;
                     else if (m.emissive) mat.color.copy(m.emissive);
                     return mat;
                 });
-                if (!Array.isArray(origMats)) child.material = child.material[0];
+                if (!Array.isArray(sourceMats)) child.material = child.material[0];
                 break;
             }
             case 'matcap': {
@@ -1330,7 +1347,7 @@ function applyRenderMode() {
                 break;
             }
             case 'matcap-surface': {
-                const origMat = Array.isArray(origMats) ? origMats[0] : origMats;
+                const origMat = Array.isArray(sourceMats) ? sourceMats[0] : sourceMats;
                 const mat = new THREE.MeshMatcapMaterial({ matcap: matcapTexture, side });
                 if (origMat.map) mat.map = origMat.map;
                 child.material = mat;
