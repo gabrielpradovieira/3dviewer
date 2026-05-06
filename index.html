@@ -646,8 +646,6 @@
     <button class="model-btn" data-model="1">Blade</button>
     <button class="model-btn" data-model="2">Cargo Transporter</button>
     <button class="model-btn" data-model="3">Fiesta Tea</button>
-    <button class="model-btn" data-model="4">Kimera Evo 37</button>
-    <button class="model-btn" data-model="5">Halo Spartan</button>
 </div>
 
 <!-- Stats -->
@@ -698,7 +696,7 @@
     <kbd>LMB</kbd> / Touch: Orbit<br>
     <kbd>RMB</kbd> / 2-finger: Pan<br>
     <kbd>Scroll</kbd> / Pinch: Zoom<br>
-    <kbd>1-6</kbd> Switch models<br>
+    <kbd>1-4</kbd> Switch models<br>
     <kbd>W</kbd> Toggle wireframe<br>
     <kbd>N</kbd> Toggle normals<br>
     <kbd>U</kbd> Toggle UV checker<br>
@@ -707,7 +705,7 @@
     <kbd>G</kbd> Toggle grid<br>
     <kbd>Space</kbd> Play/Pause animation<br>
     <kbd>R</kbd> Reset camera<br>
-    Use Model 1-6 to switch preset models
+    Use Model 1-4 to switch preset models
 </div>
 
 <!-- Three.js and loaders from CDN -->
@@ -836,58 +834,31 @@ const uvCheckerTexture = createUVCheckerTexture();
 
 // ─── State ───
 const state = {
-    models: [null, null, null, null, null, null],
+    models: [null, null, null, null],
     modelConfigs: [
         { path: 'models/model1/', file: 'Hammer.fbx', label: 'Hammer', rotateAxis: 'y' },
         { path: 'models/model2/', file: 'Blade.fbx', label: 'Blade', rotateAxis: 'y' },
         { path: 'models/model3/', file: 'Cargo_Transporter.fbx', label: 'Cargo Transporter', rotateAxis: 'y' },
         {
             path: 'models/model4/',
-            file: 'fiesta_tea.glb',
+            file: 'fiesta_tea.fbx',
             label: 'Fiesta Tea',
             rotateAxis: 'y',
             useOriginalMaterials: true,
+            standardizeMaterials: true,
             removeMeshes: ['Object_12', 'Object_28'],
             removeMaterials: ['peripheri_Base_Color'],
+            textureDir: 'fiesta_tea.fbm/',
+            textureFlipY: true,
+            brightenTextures: true,
             useEmbeddedOpacity: true,
             alphaCutoffs: {
-                trad_edges: 0.02,
-                'table_Base_Color.002': 0.46
-            }
-        },
-        {
-            path: 'models/model5/',
-            file: 'kimera_evo_37.glb',
-            label: 'Kimera Evo 37',
-            rotateAxis: 'y',
-            useOriginalMaterials: true,
+                VRayMtl2: 0.02
+            },
             textureRules: [
-                { match: /^x3_bd01/, map: 'x3_bd01.png', normalMap: 'x3_bd01_nm.png' },
-                { match: /^x3_bd03/, normalMap: 'x3_bd03_nm.png' },
-                { match: /^x3_bd04/, map: 'x3_bd04.png' },
-                { match: /^x3_cn01/, normalMap: 'carbon_n_vecarz.png' },
-                { match: /^wb-d/, map: 'wb-d.png', normalMap: 'wb_d_n.png' },
-                { match: /^wb_tire|^gomma/, map: 'wb_tire.png', normalMap: 'wb_tire_nrm.png' },
-                { match: /^Rotiform_logo|^kb43|^vehicle_generic_smallspecmap/, map: '007_Wheel_18_8_ROTIFORM.png' },
-                { match: /brake/i, map: 'label_brake.png' }
-            ]
-        },
-        {
-            path: 'models/model6/',
-            file: 'Spartan_Sketchfab.fbx',
-            label: 'Halo Spartan',
-            rotateAxis: 'y',
-            useOriginalMaterials: true,
-            standardizeMaterials: true,
-            textureRules: [
-                { match: /^lambert1/i, map: 'lambert1_Colour-Opacity.png', normalMap: 'lambert1_Nrm.png', roughnessMap: 'lambert1_Roughness.png', alphaTest: 0.1 },
-                { match: /^ODST_Shoulder_Mat/i, set: 'ODST_Shoulder_Mat' },
-                { match: /^Spartan_Arms_Mat/i, set: 'Spartan_Arms_Mat' },
-                { match: /^Spartan_Chest_Mat/i, set: 'Spartan_Chest_Mat' },
-                { match: /^Spartan_Ears_Mat/i, set: 'Spartan_Ears_Mat' },
-                { match: /^Spartan_Helmet_Mat/i, set: 'Spartan_Helmet_Mat' },
-                { match: /^Spartan_Legs_Mat/i, set: 'Spartan_Legs_Mat' },
-                { match: /^Spartan_Undersuit_Mat/i, set: 'Spartan_Undersuit_Mat' }
+                { slot: 0, match: /^VRayMtl1$/i, map: 'VRayMtl1.jpg' },
+                { slot: 1, match: /^VRayMtl2$/i, map: 'VRayMtl2.png', alphaMap: 'VRayMtl3_opacity.png', alphaTest: 0.02, transparent: true },
+                { slot: 2, match: /^VRayMtl3$/i, map: 'VRayMtl3.png' }
             ]
         }
     ],
@@ -946,8 +917,8 @@ function applyEmbeddedOpacity(material, alphaCutoff) {
     if (!material) return material;
     material.side = THREE.DoubleSide;
     if (material.alphaMap || material.map?.image) {
-        material.transparent = false;
-        material.depthWrite = true;
+        material.transparent = material.transparent || false;
+        material.depthWrite = !material.transparent;
         material.alphaTest = alphaCutoff ?? material.alphaTest ?? 0;
     }
     material.needsUpdate = true;
@@ -955,10 +926,11 @@ function applyEmbeddedOpacity(material, alphaCutoff) {
 }
 
 function loadConfiguredTexture(config, fileName, isColor = false) {
-    const url = encodeURI(`${config.path}images/${fileName}`);
+    const textureDir = config.textureDir || 'images/';
+    const url = encodeURI(`${config.path}${textureDir}${fileName}`);
     if (!configuredTextureCache.has(url)) {
         const texture = textureLoader.load(url);
-        texture.flipY = false;
+        texture.flipY = config.textureFlipY ?? false;
         texture.wrapS = THREE.RepeatWrapping;
         texture.wrapT = THREE.RepeatWrapping;
         texture.colorSpace = isColor ? THREE.SRGBColorSpace : THREE.NoColorSpace;
@@ -967,9 +939,13 @@ function loadConfiguredTexture(config, fileName, isColor = false) {
     return configuredTextureCache.get(url);
 }
 
-function applyConfiguredTextures(material, config) {
+function applyConfiguredTextures(material, config, materialIndex = 0) {
     if (!material || !config.textureRules) return material;
-    const rule = config.textureRules.find(({ match }) => match.test(material.name || ''));
+    const materialName = material.name || '';
+    const rule = config.textureRules.find(({ match }) => match?.test(materialName))
+        || ((materialName === '' || /^Material$/i.test(materialName))
+            ? config.textureRules.find(({ slot }) => slot === materialIndex)
+            : null);
     if (!rule) return material;
 
     const mapFile = rule.map || (rule.set ? `${rule.set}_BaseColor.png` : null);
@@ -977,9 +953,19 @@ function applyConfiguredTextures(material, config) {
     const roughnessFile = rule.roughnessMap || (rule.set ? `${rule.set}_Roughness.png` : null);
     const metalnessFile = rule.metalnessMap || (rule.set ? `${rule.set}_Metallic.png` : null);
     const aoFile = rule.aoMap || (rule.set ? `${rule.set}_AO.png` : null);
+    const alphaFile = rule.alphaMap || null;
+    const opacityViewFile = rule.opacityViewMap || null;
 
     if (mapFile) {
         material.map = loadConfiguredTexture(config, mapFile, true);
+        material.color?.set?.(0xffffff);
+        material.roughness = 0.72;
+        material.metalness = 0.0;
+        if (config.brightenTextures && material.emissive) {
+            material.emissive.set(0xffffff);
+            material.emissiveMap = material.map;
+            material.emissiveIntensity = 0.18;
+        }
     }
     if (normalFile) {
         material.normalMap = loadConfiguredTexture(config, normalFile);
@@ -994,10 +980,18 @@ function applyConfiguredTextures(material, config) {
     if (aoFile) {
         material.aoMap = loadConfiguredTexture(config, aoFile);
     }
+    if (alphaFile) {
+        material.alphaMap = loadConfiguredTexture(config, alphaFile);
+        material.transparent = Boolean(rule.transparent);
+        material.depthWrite = !rule.transparent;
+    }
+    if (opacityViewFile) {
+        material.userData.opacityViewMap = loadConfiguredTexture(config, opacityViewFile);
+    }
     if (rule.alphaTest !== undefined) {
-        material.transparent = false;
+        material.transparent = Boolean(rule.transparent);
         material.alphaTest = rule.alphaTest;
-        material.depthWrite = true;
+        material.depthWrite = !rule.transparent;
     }
     material.needsUpdate = true;
     return material;
@@ -1187,32 +1181,33 @@ function setupModel(loadedObject, index) {
     state.originalMaterials.set(object, new Map());
     object.traverse((child) => {
         if (child.isMesh) {
-            const sourceMaterials = child.material
+            let sourceMaterials = child.material
                 ? (Array.isArray(child.material) ? child.material : [child.material])
                 : [standardGreyMaterial];
-            sourceMaterials.forEach(m => {
-                applyConfiguredTextures(m, config);
+            sourceMaterials.forEach((m, materialIndex) => {
+                applyConfiguredTextures(m, config, materialIndex);
                 if (m.map) m.map.colorSpace = THREE.SRGBColorSpace;
                 if (config.useEmbeddedOpacity) applyEmbeddedOpacity(m, config.alphaCutoffs?.[m.name]);
             });
 
             const useOriginalMaterials = Boolean(config.useOriginalMaterials);
             const displayMaterials = useOriginalMaterials
-                ? sourceMaterials.map(m => {
+                ? sourceMaterials.map((m, materialIndex) => {
                     const clone = createDisplayMaterial(m, config);
-                    applyConfiguredTextures(clone, config);
+                    applyConfiguredTextures(clone, config, materialIndex);
                     if (config.useEmbeddedOpacity) applyEmbeddedOpacity(clone, config.alphaCutoffs?.[clone.name]);
                     return clone;
                 })
                 : sourceMaterials.map(() => standardGreyMaterial.clone());
+            const useMaterialArray = Array.isArray(child.material);
             state.originalMaterials.get(object).set(
                 child,
                 {
-                    display: Array.isArray(child.material) ? displayMaterials : displayMaterials[0],
-                    source: Array.isArray(child.material) ? sourceMaterials.map(m => m.clone()) : sourceMaterials[0].clone()
+                    display: useMaterialArray ? displayMaterials : displayMaterials[0],
+                    source: useMaterialArray ? sourceMaterials.map(m => m.clone()) : sourceMaterials[0].clone()
                 }
             );
-            child.material = Array.isArray(child.material) ? displayMaterials : displayMaterials[0];
+            child.material = useMaterialArray ? displayMaterials : displayMaterials[0];
         }
     });
 
@@ -1690,6 +1685,7 @@ function applyRenderMode() {
             }
             case 'opacity': {
                 child.material = sourceArray.map(m => {
+                    if (m.userData?.opacityViewMap) return new THREE.MeshBasicMaterial({ map: m.userData.opacityViewMap, side });
                     if (m.alphaMap) return new THREE.MeshBasicMaterial({ map: m.alphaMap, side });
                     const v = m.opacity !== undefined ? m.opacity : 1;
                     return new THREE.MeshBasicMaterial({ color: new THREE.Color(v, v, v), side });
@@ -1922,7 +1918,7 @@ document.addEventListener('keydown', (e) => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
 
     switch (e.key) {
-        case '1': case '2': case '3': case '4': case '5': case '6': {
+        case '1': case '2': case '3': case '4': {
             const idx = parseInt(e.key) - 1;
             if (state.models[idx]) showModel(idx);
             break;
