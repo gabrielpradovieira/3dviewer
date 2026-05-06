@@ -298,7 +298,9 @@
             top: 12px;
             left: 260px;
             display: flex;
+            flex-wrap: wrap;
             gap: 8px;
+            max-width: calc(100vw - 300px);
             z-index: 100;
         }
 
@@ -644,6 +646,8 @@
     <button class="model-btn" data-model="1">Blade</button>
     <button class="model-btn" data-model="2">Cargo Transporter</button>
     <button class="model-btn" data-model="3">Fiesta Tea</button>
+    <button class="model-btn" data-model="4">Kimera Evo 37</button>
+    <button class="model-btn" data-model="5">Halo Spartan</button>
 </div>
 
 <!-- Stats -->
@@ -694,7 +698,7 @@
     <kbd>LMB</kbd> / Touch: Orbit<br>
     <kbd>RMB</kbd> / 2-finger: Pan<br>
     <kbd>Scroll</kbd> / Pinch: Zoom<br>
-    <kbd>1-3</kbd> Switch models<br>
+    <kbd>1-6</kbd> Switch models<br>
     <kbd>W</kbd> Toggle wireframe<br>
     <kbd>N</kbd> Toggle normals<br>
     <kbd>U</kbd> Toggle UV checker<br>
@@ -703,7 +707,7 @@
     <kbd>G</kbd> Toggle grid<br>
     <kbd>Space</kbd> Play/Pause animation<br>
     <kbd>R</kbd> Reset camera<br>
-    Use Model 1-4 to switch preset models
+    Use Model 1-6 to switch preset models
 </div>
 
 <!-- Three.js and loaders from CDN -->
@@ -832,7 +836,7 @@ const uvCheckerTexture = createUVCheckerTexture();
 
 // ─── State ───
 const state = {
-    models: [null, null, null, null],
+    models: [null, null, null, null, null, null],
     modelConfigs: [
         { path: 'models/model1/', file: 'Hammer.fbx', label: 'Hammer', rotateAxis: 'y' },
         { path: 'models/model2/', file: 'Blade.fbx', label: 'Blade', rotateAxis: 'y' },
@@ -847,9 +851,44 @@ const state = {
             removeMaterials: ['peripheri_Base_Color'],
             useEmbeddedOpacity: true,
             alphaCutoffs: {
-                trad_edges: 0.32,
+                trad_edges: 0.02,
                 'table_Base_Color.002': 0.46
             }
+        },
+        {
+            path: 'models/model5/',
+            file: 'kimera_evo_37.glb',
+            label: 'Kimera Evo 37',
+            rotateAxis: 'y',
+            useOriginalMaterials: true,
+            textureRules: [
+                { match: /^x3_bd01/, map: 'x3_bd01.png', normalMap: 'x3_bd01_nm.png' },
+                { match: /^x3_bd03/, normalMap: 'x3_bd03_nm.png' },
+                { match: /^x3_bd04/, map: 'x3_bd04.png' },
+                { match: /^x3_cn01/, normalMap: 'carbon_n_vecarz.png' },
+                { match: /^wb-d/, map: 'wb-d.png', normalMap: 'wb_d_n.png' },
+                { match: /^wb_tire|^gomma/, map: 'wb_tire.png', normalMap: 'wb_tire_nrm.png' },
+                { match: /^Rotiform_logo|^kb43|^vehicle_generic_smallspecmap/, map: '007_Wheel_18_8_ROTIFORM.png' },
+                { match: /brake/i, map: 'label_brake.png' }
+            ]
+        },
+        {
+            path: 'models/model6/',
+            file: 'Spartan_Sketchfab.fbx',
+            label: 'Halo Spartan',
+            rotateAxis: 'y',
+            useOriginalMaterials: true,
+            standardizeMaterials: true,
+            textureRules: [
+                { match: /^lambert1/i, map: 'lambert1_Colour-Opacity.png', normalMap: 'lambert1_Nrm.png', roughnessMap: 'lambert1_Roughness.png', alphaTest: 0.1 },
+                { match: /^ODST_Shoulder_Mat/i, set: 'ODST_Shoulder_Mat' },
+                { match: /^Spartan_Arms_Mat/i, set: 'Spartan_Arms_Mat' },
+                { match: /^Spartan_Chest_Mat/i, set: 'Spartan_Chest_Mat' },
+                { match: /^Spartan_Ears_Mat/i, set: 'Spartan_Ears_Mat' },
+                { match: /^Spartan_Helmet_Mat/i, set: 'Spartan_Helmet_Mat' },
+                { match: /^Spartan_Legs_Mat/i, set: 'Spartan_Legs_Mat' },
+                { match: /^Spartan_Undersuit_Mat/i, set: 'Spartan_Undersuit_Mat' }
+            ]
         }
     ],
     currentModelIndex: 0,
@@ -863,6 +902,7 @@ const state = {
     uvCheckerVisible: false,
     normalHelpers: [],
     wireframeMeshes: [],
+    wireframeMaterials: [],
     uvLayoutImages: new WeakMap(),
     mixer: null,
     currentAction: null,
@@ -894,6 +934,7 @@ const gltfLoader = new GLTFLoader();
 const objLoader = new OBJLoader();
 const mtlLoader = new MTLLoader();
 const textureLoader = new THREE.TextureLoader();
+const configuredTextureCache = new Map();
 const standardGreyMaterial = new THREE.MeshStandardMaterial({
     color: 0xd6d6d2,
     roughness: 0.65,
@@ -910,6 +951,72 @@ function applyEmbeddedOpacity(material, alphaCutoff) {
         material.alphaTest = alphaCutoff ?? material.alphaTest ?? 0;
     }
     material.needsUpdate = true;
+    return material;
+}
+
+function loadConfiguredTexture(config, fileName, isColor = false) {
+    const url = encodeURI(`${config.path}images/${fileName}`);
+    if (!configuredTextureCache.has(url)) {
+        const texture = textureLoader.load(url);
+        texture.flipY = false;
+        texture.wrapS = THREE.RepeatWrapping;
+        texture.wrapT = THREE.RepeatWrapping;
+        texture.colorSpace = isColor ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+        configuredTextureCache.set(url, texture);
+    }
+    return configuredTextureCache.get(url);
+}
+
+function applyConfiguredTextures(material, config) {
+    if (!material || !config.textureRules) return material;
+    const rule = config.textureRules.find(({ match }) => match.test(material.name || ''));
+    if (!rule) return material;
+
+    const mapFile = rule.map || (rule.set ? `${rule.set}_BaseColor.png` : null);
+    const normalFile = rule.normalMap || (rule.set ? `${rule.set}_Normal.png` : null);
+    const roughnessFile = rule.roughnessMap || (rule.set ? `${rule.set}_Roughness.png` : null);
+    const metalnessFile = rule.metalnessMap || (rule.set ? `${rule.set}_Metallic.png` : null);
+    const aoFile = rule.aoMap || (rule.set ? `${rule.set}_AO.png` : null);
+
+    if (mapFile) {
+        material.map = loadConfiguredTexture(config, mapFile, true);
+    }
+    if (normalFile) {
+        material.normalMap = loadConfiguredTexture(config, normalFile);
+    }
+    if (roughnessFile) {
+        material.roughnessMap = loadConfiguredTexture(config, roughnessFile);
+    }
+    if (metalnessFile) {
+        material.metalnessMap = loadConfiguredTexture(config, metalnessFile);
+        material.metalness = 1;
+    }
+    if (aoFile) {
+        material.aoMap = loadConfiguredTexture(config, aoFile);
+    }
+    if (rule.alphaTest !== undefined) {
+        material.transparent = false;
+        material.alphaTest = rule.alphaTest;
+        material.depthWrite = true;
+    }
+    material.needsUpdate = true;
+    return material;
+}
+
+function createDisplayMaterial(sourceMaterial, config) {
+    if (!config.standardizeMaterials) {
+        return sourceMaterial.clone();
+    }
+
+    const material = new THREE.MeshStandardMaterial({
+        name: sourceMaterial.name,
+        color: sourceMaterial.color?.clone?.() || new THREE.Color(0xd6d6d2),
+        roughness: sourceMaterial.roughness ?? 0.62,
+        metalness: sourceMaterial.metalness ?? 0.0,
+        side: sourceMaterial.side ?? THREE.DoubleSide
+    });
+    material.transparent = sourceMaterial.transparent;
+    material.alphaTest = sourceMaterial.alphaTest || 0;
     return material;
 }
 
@@ -1084,6 +1191,7 @@ function setupModel(loadedObject, index) {
                 ? (Array.isArray(child.material) ? child.material : [child.material])
                 : [standardGreyMaterial];
             sourceMaterials.forEach(m => {
+                applyConfiguredTextures(m, config);
                 if (m.map) m.map.colorSpace = THREE.SRGBColorSpace;
                 if (config.useEmbeddedOpacity) applyEmbeddedOpacity(m, config.alphaCutoffs?.[m.name]);
             });
@@ -1091,7 +1199,8 @@ function setupModel(loadedObject, index) {
             const useOriginalMaterials = Boolean(config.useOriginalMaterials);
             const displayMaterials = useOriginalMaterials
                 ? sourceMaterials.map(m => {
-                    const clone = m.clone();
+                    const clone = createDisplayMaterial(m, config);
+                    applyConfiguredTextures(clone, config);
                     if (config.useEmbeddedOpacity) applyEmbeddedOpacity(clone, config.alphaCutoffs?.[clone.name]);
                     return clone;
                 })
@@ -1502,6 +1611,12 @@ function clearOverlays() {
         m.material?.dispose();
     });
     state.wireframeMeshes = [];
+    state.wireframeMaterials.forEach(({ mesh, material, wireMaterial }) => {
+        const tempMaterials = Array.isArray(wireMaterial) ? wireMaterial : [wireMaterial];
+        tempMaterials.forEach(mat => mat?.dispose?.());
+        mesh.material = material;
+    });
+    state.wireframeMaterials = [];
 }
 
 function restoreOriginalMaterials() {
@@ -1625,6 +1740,22 @@ function addWireframeOverlay() {
     if (!state.currentModel) return;
     state.currentModel.traverse((child) => {
         if (!child.isMesh) return;
+        if (child.isSkinnedMesh) {
+            const originalMaterial = child.material;
+            const materials = Array.isArray(child.material) ? child.material : [child.material];
+            const wireMaterials = materials.map(() => new THREE.MeshBasicMaterial({
+                color: state.wireframeColor,
+                wireframe: true,
+                side: THREE.DoubleSide,
+                depthTest: true,
+                transparent: true,
+                opacity: 0.95
+            }));
+            child.material = Array.isArray(child.material) ? wireMaterials : wireMaterials[0];
+            state.wireframeMaterials.push({ mesh: child, material: originalMaterial, wireMaterial: child.material });
+            return;
+        }
+
         const wireGeo = new THREE.WireframeGeometry(child.geometry);
         const lineMat = new THREE.LineBasicMaterial({
             color: state.wireframeColor,
@@ -1791,7 +1922,7 @@ document.addEventListener('keydown', (e) => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
 
     switch (e.key) {
-        case '1': case '2': case '3': {
+        case '1': case '2': case '3': case '4': case '5': case '6': {
             const idx = parseInt(e.key) - 1;
             if (state.models[idx]) showModel(idx);
             break;
