@@ -646,6 +646,11 @@
     <button class="model-btn" data-model="1">Blade</button>
     <button class="model-btn" data-model="2">Cargo Transporter</button>
     <button class="model-btn" data-model="3">Fiesta Tea</button>
+    <button class="model-btn" data-model="4">Brute Knight</button>
+    <button class="model-btn" data-model="5">Cuphead</button>
+    <button class="model-btn" data-model="6">Cannon</button>
+    <button class="model-btn" data-model="7">Flying Drone</button>
+    <button class="model-btn" data-model="8">Axe</button>
 </div>
 
 <!-- Stats -->
@@ -696,7 +701,7 @@
     <kbd>LMB</kbd> / Touch: Orbit<br>
     <kbd>RMB</kbd> / 2-finger: Pan<br>
     <kbd>Scroll</kbd> / Pinch: Zoom<br>
-    <kbd>1-4</kbd> Switch models<br>
+    <kbd>1-9</kbd> Switch models<br>
     <kbd>W</kbd> Toggle wireframe<br>
     <kbd>N</kbd> Toggle normals<br>
     <kbd>U</kbd> Toggle UV checker<br>
@@ -705,7 +710,7 @@
     <kbd>G</kbd> Toggle grid<br>
     <kbd>Space</kbd> Play/Pause animation<br>
     <kbd>R</kbd> Reset camera<br>
-    Use Model 1-4 to switch preset models
+    Use Model 1-9 to switch preset models
 </div>
 
 <!-- Three.js and loaders from CDN -->
@@ -713,7 +718,8 @@
 {
     "imports": {
         "three": "https://cdn.jsdelivr.net/npm/three@0.162.0/build/three.module.js",
-        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.162.0/examples/jsm/"
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.162.0/examples/jsm/",
+        "local/FBXLoader.js": "./vendor/FBXLoader.js"
     }
 }
 </script>
@@ -722,7 +728,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { FBXLoader } from 'local/FBXLoader.js';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
 import { VertexNormalsHelper } from 'three/addons/helpers/VertexNormalsHelper.js';
@@ -730,7 +736,7 @@ import { VertexNormalsHelper } from 'three/addons/helpers/VertexNormalsHelper.js
 // ─── Scene setup ───
 const container = document.getElementById('canvas-container');
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -752,13 +758,13 @@ controls.rotateSpeed = 0.8;
 controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
 
 // ─── Lighting ───
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.85);
 scene.add(ambientLight);
 
-const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
+const dirLight = new THREE.DirectionalLight(0xffffff, 0.75);
 dirLight.position.set(5, 8, 5);
 dirLight.castShadow = true;
-dirLight.shadow.mapSize.set(2048, 2048);
+dirLight.shadow.mapSize.set(1024, 1024);
 dirLight.shadow.camera.near = 0.1;
 dirLight.shadow.camera.far = 50;
 dirLight.shadow.camera.left = -10;
@@ -767,11 +773,20 @@ dirLight.shadow.camera.top = 10;
 dirLight.shadow.camera.bottom = -10;
 scene.add(dirLight);
 
-const fillLight = new THREE.DirectionalLight(0x8888ff, 0.3);
-fillLight.position.set(-3, 2, -3);
+const fillLight = new THREE.DirectionalLight(0xffffff, 0.6);
+fillLight.position.set(-5, 4, -4);
 scene.add(fillLight);
 
-const hemiLight = new THREE.HemisphereLight(0xffffff, 0x888888, 0.4);
+const rimLight = new THREE.DirectionalLight(0xffffff, 0.45);
+rimLight.position.set(-3, 5, 6);
+scene.add(rimLight);
+
+const bruteFillLight = new THREE.PointLight(0xffffff, 1.0, 12, 1.8);
+bruteFillLight.position.set(-2.5, 2.6, 3.5);
+bruteFillLight.visible = false;
+scene.add(bruteFillLight);
+
+const hemiLight = new THREE.HemisphereLight(0xffffff, 0x9a9a9a, 0.7);
 scene.add(hemiLight);
 
 // Ground grid
@@ -834,7 +849,8 @@ const uvCheckerTexture = createUVCheckerTexture();
 
 // ─── State ───
 const state = {
-    models: [null, null, null, null],
+    models: [null, null, null, null, null, null, null, null, null],
+    loadingPromises: new Map(),
     modelConfigs: [
         { path: 'models/model1/', file: 'Hammer.fbx', label: 'Hammer', rotateAxis: 'y' },
         { path: 'models/model2/', file: 'Blade.fbx', label: 'Blade', rotateAxis: 'y' },
@@ -859,6 +875,78 @@ const state = {
                 { slot: 0, match: /^VRayMtl1$/i, map: 'VRayMtl1.jpg' },
                 { slot: 1, match: /^VRayMtl2$/i, map: 'VRayMtl2.png', alphaMap: 'VRayMtl3_opacity.png', alphaTest: 0.02, transparent: true },
                 { slot: 2, match: /^VRayMtl3$/i, map: 'VRayMtl3.png' }
+            ]
+        },
+        {
+            path: 'models/model5/',
+            file: 'brute_knight.glb',
+            label: 'Brute Knight',
+            rotateAxis: 'y',
+            useOriginalMaterials: true,
+            lightRig: { key: 0.9, fill: 1.15, rim: 0.85, ambient: 0.72, hemisphere: 0.75, bruteFill: 1.35 },
+            viewBounds: { excludePattern: /Object_(16|20|21|22|37)|sword|blade|weapon|razor_metal/i },
+            cameraDistanceScale: 0.34,
+            cameraTargetOffset: { y: -1.35 },
+            rotationPivot: { mode: 'footCenterWithoutWeapon', weaponPattern: /Object_(16|20|21|22|37)|sword|blade|weapon|razor_metal/i },
+            materialAdjust: { exposure: 1.12, saturation: 0.94, metalnessMapDarken: 0.72, roughnessMin: 0.32, metalnessMax: 1.0, envIntensity: 1.05, emissiveBoost: 0 }
+        },
+        { path: 'models/model6/', file: 'cuphead.glb', label: 'Cuphead', rotateAxis: 'y', useOriginalMaterials: true, animationSpeed: 2.4 },
+        {
+            path: 'models/model7/',
+            file: 'cannon_lp.fbx',
+            label: 'Cannon',
+            rotateAxis: 'y',
+            useOriginalMaterials: true,
+            standardizeMaterials: true,
+            textureDir: 'images_web/',
+            textureFlipY: true,
+            materialAdjust: { exposure: 1.2, saturation: 0.82, roughnessMin: 0.9, metalnessMax: 0.15, emissiveBoost: 0.08 },
+            textureRules: [
+                { slot: 0, match: /Phong|cannon|Material/i, map: 'Cannon_BC.webp', normalMap: 'Cannon_NM.webp', roughnessMap: 'Cannon_R.webp', metalnessMap: 'Cannon_M.webp', aoMap: 'Cannon_AO.webp' }
+            ]
+        },
+        {
+            path: 'models/model8/Drone_Anim/',
+            file: 'drone_anim.fbx',
+            label: 'Flying Drone',
+            rotateAxis: 'y',
+            useOriginalMaterials: true,
+            standardizeMaterials: true,
+            preserveAnimatedRootTransform: true,
+            removeAnimationTracks: [/^Drone_Controller\.position$/],
+            textureRoot: '../',
+            textureDir: 'images_web/',
+            textureFlipY: true,
+            materialAdjust: { exposure: 1.08, saturation: 0.96, roughnessMin: 0.48, metalnessMax: 1.0, envIntensity: 0.9, emissiveBoost: 0.03 },
+            textureAliases: {
+                'body_albedo.png': 'body_albedo.webp',
+                'body_emissive.png': 'body_emissive.webp',
+                'body_roughness.png': 'body_roughness.webp',
+                'body_normal.png': 'body_normal.webp',
+                'leg_albedo.png': 'leg_albedo.webp',
+                'leg_roughness.png': 'leg_roughness.webp',
+                'leg_normal.png': 'leg_normal.webp',
+                'concrete_044_basecolor.png': 'concrete_044_basecolor.webp',
+                'concrete_044_normal.png': 'concrete_044_normal.webp'
+            },
+            textureRules: [
+                { match: /^body$/i, map: 'body_albedo.webp', normalMap: 'body_normal.webp', roughnessMap: 'body_roughness.webp', metalnessMap: 'body_metallic.webp', aoMap: 'body_AO.webp', emissiveMap: 'body_emissive.webp' },
+                { match: /^leg$/i, map: 'leg_albedo.webp', normalMap: 'leg_normal.webp', roughnessMap: 'leg_roughness.webp', metalnessMap: 'leg_metallic.webp', aoMap: 'leg_AO.webp' },
+                { match: /^Boden$/i, map: 'concrete_044_basecolor.webp', normalMap: 'concrete_044_normal.webp', roughnessMap: 'concrete_044_roughness.webp', metalnessMap: 'concrete_044_metallic.webp', aoMap: 'concrete_044_AO.webp' }
+            ]
+        },
+        {
+            path: 'models/model9/',
+            file: 'Axe2.fbx',
+            label: 'Axe',
+            rotateAxis: 'y',
+            useOriginalMaterials: true,
+            standardizeMaterials: true,
+            textureDir: 'images/',
+            textureFlipY: true,
+            materialAdjust: { exposure: 1.25, saturation: 0.92, roughnessMin: 0.62, metalnessMax: 0.35, emissiveBoost: 0.08 },
+            textureRules: [
+                { slot: 0, match: /Phong|Axe|Material|texture/i, map: 'texture.png' }
             ]
         }
     ],
@@ -927,7 +1015,8 @@ function applyEmbeddedOpacity(material, alphaCutoff) {
 
 function loadConfiguredTexture(config, fileName, isColor = false) {
     const textureDir = config.textureDir || 'images/';
-    const url = encodeURI(`${config.path}${textureDir}${fileName}`);
+    const textureRoot = config.textureRoot || '';
+    const url = encodeURI(`${config.path}${textureRoot}${textureDir}${fileName}`);
     if (!configuredTextureCache.has(url)) {
         const texture = textureLoader.load(url);
         texture.flipY = config.textureFlipY ?? false;
@@ -942,8 +1031,12 @@ function loadConfiguredTexture(config, fileName, isColor = false) {
 function applyConfiguredTextures(material, config, materialIndex = 0) {
     if (!material || !config.textureRules) return material;
     const materialName = material.name || '';
-    const rule = config.textureRules.find(({ match }) => match?.test(materialName))
-        || ((materialName === '' || /^Material$/i.test(materialName))
+    const forcedSlotRule = config.forceSlotFallback
+        ? config.textureRules.find(({ slot }) => slot === materialIndex)
+        : null;
+    const rule = forcedSlotRule
+        || config.textureRules.find(({ match }) => match?.test(materialName))
+        || ((config.forceSlotFallback || materialName === '' || /^(Material|lambert|phong|Phong\d*)$/i.test(materialName))
             ? config.textureRules.find(({ slot }) => slot === materialIndex)
             : null);
     if (!rule) return material;
@@ -953,6 +1046,7 @@ function applyConfiguredTextures(material, config, materialIndex = 0) {
     const roughnessFile = rule.roughnessMap || (rule.set ? `${rule.set}_Roughness.png` : null);
     const metalnessFile = rule.metalnessMap || (rule.set ? `${rule.set}_Metallic.png` : null);
     const aoFile = rule.aoMap || (rule.set ? `${rule.set}_AO.png` : null);
+    const emissiveFile = rule.emissiveMap || null;
     const alphaFile = rule.alphaMap || null;
     const opacityViewFile = rule.opacityViewMap || null;
 
@@ -980,6 +1074,11 @@ function applyConfiguredTextures(material, config, materialIndex = 0) {
     if (aoFile) {
         material.aoMap = loadConfiguredTexture(config, aoFile);
     }
+    if (emissiveFile && material.emissive) {
+        material.emissiveMap = loadConfiguredTexture(config, emissiveFile, true);
+        material.emissive.set(0xffffff);
+        material.emissiveIntensity = material.emissiveIntensity || 0.2;
+    }
     if (alphaFile) {
         material.alphaMap = loadConfiguredTexture(config, alphaFile);
         material.transparent = Boolean(rule.transparent);
@@ -992,6 +1091,165 @@ function applyConfiguredTextures(material, config, materialIndex = 0) {
         material.transparent = Boolean(rule.transparent);
         material.alphaTest = rule.alphaTest;
         material.depthWrite = !rule.transparent;
+    }
+    material.needsUpdate = true;
+    return material;
+}
+
+const emptyTextureDataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
+
+function getUrlFilename(url) {
+    return decodeURIComponent(url.split('?')[0].split('#')[0].split('/').pop().split('\\').pop()).toLowerCase();
+}
+
+function getConfiguredTexturePath(config, filename) {
+    const lowerFilename = filename.toLowerCase();
+    const explicitAlias = config.textureAliases?.[lowerFilename];
+    if (explicitAlias) return `${config.path}${config.textureRoot || ''}${config.textureDir || ''}${explicitAlias}`;
+
+    const fields = ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap', 'alphaMap', 'opacityViewMap'];
+    for (const rule of config.textureRules || []) {
+        for (const field of fields) {
+            const target = rule[field];
+            if (target && getUrlFilename(target) === lowerFilename) {
+                return `${config.path}${config.textureRoot || ''}${config.textureDir || ''}${target}`;
+            }
+        }
+    }
+    return null;
+}
+
+function redirectFbxTextureUrl(url, config) {
+    if (!config) return url;
+    const filename = getUrlFilename(url);
+    if (!/\.(png|jpe?g|webp|bmp|gif|tga|tiff?|exr)$/i.test(filename)) return url;
+    const configuredPath = getConfiguredTexturePath(config, filename);
+    if (configuredPath) return encodeURI(configuredPath);
+    return emptyTextureDataUrl;
+}
+
+function adjustTextureColor(texture, config) {
+    const adjust = config.materialAdjust;
+    if (!texture?.image || !adjust?.exposure && !adjust?.saturation) return texture;
+    const key = `${texture.uuid}|${adjust.exposure || 1}|${adjust.saturation || 1}`;
+    if (configuredTextureCache.has(key)) return configuredTextureCache.get(key);
+
+    const image = texture.image;
+    const width = image.width || image.videoWidth;
+    const height = image.height || image.videoHeight;
+    if (!width || !height) return texture;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(image, 0, 0, width, height);
+    const imageData = ctx.getImageData(0, 0, width, height);
+    const data = imageData.data;
+    const exposure = adjust.exposure || 1;
+    const saturation = adjust.saturation || 1;
+
+    for (let i = 0; i < data.length; i += 4) {
+        let r = Math.min(255, data[i] * exposure);
+        let g = Math.min(255, data[i + 1] * exposure);
+        let b = Math.min(255, data[i + 2] * exposure);
+        const luma = r * 0.2126 + g * 0.7152 + b * 0.0722;
+        data[i] = Math.round(Math.min(255, luma + (r - luma) * saturation));
+        data[i + 1] = Math.round(Math.min(255, luma + (g - luma) * saturation));
+        data[i + 2] = Math.round(Math.min(255, luma + (b - luma) * saturation));
+    }
+    ctx.putImageData(imageData, 0, 0);
+
+    const adjusted = new THREE.CanvasTexture(canvas);
+    adjusted.flipY = texture.flipY;
+    adjusted.wrapS = texture.wrapS;
+    adjusted.wrapT = texture.wrapT;
+    adjusted.colorSpace = texture.colorSpace;
+    adjusted.needsUpdate = true;
+    configuredTextureCache.set(key, adjusted);
+    return adjusted;
+}
+
+function darkenScalarTexture(texture, factor = 1) {
+    if (!texture?.image || factor >= 1) return texture;
+    const key = `${texture.uuid}|scalar-darken|${factor}`;
+    if (configuredTextureCache.has(key)) return configuredTextureCache.get(key);
+
+    const image = texture.image;
+    const width = image.width || image.videoWidth;
+    const height = image.height || image.videoHeight;
+    if (!width || !height) return texture;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(image, 0, 0, width, height);
+    const imageData = ctx.getImageData(0, 0, width, height);
+    const data = imageData.data;
+    for (let i = 0; i < data.length; i += 4) {
+        data[i] = Math.round(data[i] * factor);
+        data[i + 1] = Math.round(data[i + 1] * factor);
+        data[i + 2] = Math.round(data[i + 2] * factor);
+    }
+    ctx.putImageData(imageData, 0, 0);
+
+    const adjusted = new THREE.CanvasTexture(canvas);
+    adjusted.flipY = texture.flipY;
+    adjusted.wrapS = texture.wrapS;
+    adjusted.wrapT = texture.wrapT;
+    adjusted.colorSpace = THREE.NoColorSpace;
+    adjusted.needsUpdate = true;
+    configuredTextureCache.set(key, adjusted);
+    return adjusted;
+}
+
+function applyMaterialAdjustments(material, config) {
+    const adjust = config.materialAdjust;
+    if (!material || !adjust) return material;
+
+    if (material.map) {
+        if (material.map.image?.complete || material.map.image?.width) {
+            material.map = adjustTextureColor(material.map, config);
+        } else {
+            material.map.addEventListener?.('update', () => {
+                material.map = adjustTextureColor(material.map, config);
+                material.needsUpdate = true;
+            });
+        }
+        const fallbackBoost = Math.min(0.28, Math.max(0, ((adjust.exposure ?? 1) - 1) * 0.38));
+        const emissiveBoost = adjust.emissiveBoost ?? fallbackBoost;
+        if (material.emissive && material.map && emissiveBoost > 0) {
+            material.emissive.set(0xffffff);
+            material.emissiveMap = material.emissiveMap || material.map;
+            material.emissiveIntensity = emissiveBoost;
+        } else if (material.emissive && adjust.emissiveBoost === 0) {
+            material.emissive.set(0x000000);
+            material.emissiveMap = null;
+            material.emissiveIntensity = 0;
+        }
+    }
+    if (material.color && !material.map && adjust.exposure) {
+        material.color.multiplyScalar(adjust.exposure);
+    }
+    if (adjust.roughnessMin !== undefined) {
+        material.roughness = Math.max(material.roughness ?? 0.5, adjust.roughnessMin);
+    }
+    if (material.metalnessMap && adjust.metalnessMapDarken !== undefined) {
+        if (material.metalnessMap.image?.complete || material.metalnessMap.image?.width) {
+            material.metalnessMap = darkenScalarTexture(material.metalnessMap, adjust.metalnessMapDarken);
+        } else {
+            material.metalnessMap.addEventListener?.('update', () => {
+                material.metalnessMap = darkenScalarTexture(material.metalnessMap, adjust.metalnessMapDarken);
+                material.needsUpdate = true;
+            });
+        }
+    }
+    if (adjust.metalnessMax !== undefined) {
+        material.metalness = Math.min(material.metalness ?? 0, adjust.metalnessMax);
+    }
+    if (adjust.envIntensity !== undefined && 'envMapIntensity' in material) {
+        material.envMapIntensity = adjust.envIntensity;
     }
     material.needsUpdate = true;
     return material;
@@ -1029,11 +1287,35 @@ function detectModels() {
     }));
 }
 
+async function ensureModelLoaded(index) {
+    if (state.models[index]) return state.models[index];
+    if (state.loadingPromises.has(index)) return state.loadingPromises.get(index);
+
+    const config = state.modelConfigs[index];
+    if (!config) return null;
+
+    const promise = (async () => {
+        showLoading(`Loading ${config.label || `Model ${index + 1}`}...`);
+        const result = await tryLoadModel(config, index);
+        if (!result?.model) {
+            throw result?.error || new Error(`Could not load ${config.file}`);
+        }
+        return setupModel(result.model, index);
+    })();
+
+    state.loadingPromises.set(index, promise);
+    try {
+        return await promise;
+    } finally {
+        state.loadingPromises.delete(index);
+    }
+}
+
 async function tryLoadModel(config, index) {
     const ext = config.file.split('.').pop().toLowerCase();
     const url = encodeURI(`${config.path}${config.file}`);
     try {
-        const model = await loadModelFromUrl(url, ext, config.path);
+        const model = await loadModelFromUrl(url, ext, config.path, config);
         return { model, index };
     } catch(e) {
         console.error(`Could not load preset model ${decodeURI(url)}:`, e);
@@ -1041,7 +1323,7 @@ async function tryLoadModel(config, index) {
     }
 }
 
-function loadModelFromUrl(url, ext, basePath) {
+function loadModelFromUrl(url, ext, basePath, config = null) {
     return new Promise((resolve, reject) => {
         if (ext === 'glb' || ext === 'gltf') {
             gltfLoader.load(url, (gltf) => {
@@ -1050,7 +1332,10 @@ function loadModelFromUrl(url, ext, basePath) {
                 resolve(object);
             }, undefined, reject);
         } else if (ext === 'fbx') {
-            fbxLoader.load(url, resolve, undefined, reject);
+            const manager = new THREE.LoadingManager();
+            manager.setURLModifier((requestUrl) => redirectFbxTextureUrl(requestUrl, config));
+            const loader = new FBXLoader(manager);
+            loader.load(url, resolve, undefined, reject);
         } else if (ext === 'obj') {
             const mtlUrl = url.replace('.obj', '.mtl');
             mtlLoader.setPath(basePath);
@@ -1146,11 +1431,104 @@ function removeConfiguredMeshes(root, config) {
     });
 }
 
+function removeInvalidGeometryMeshes(root) {
+    const toRemove = [];
+    root.traverse((child) => {
+        if (!child.isMesh) return;
+        const positions = child.geometry?.attributes?.position?.array;
+        if (!positions) return;
+        for (let i = 0; i < positions.length; i++) {
+            if (!Number.isFinite(positions[i])) {
+                toRemove.push(child);
+                return;
+            }
+        }
+    });
+
+    toRemove.forEach((child) => {
+        child.parent?.remove(child);
+        child.geometry?.dispose?.();
+        const mats = Array.isArray(child.material) ? child.material : [child.material];
+        mats.forEach((mat) => mat?.dispose?.());
+    });
+}
+
+function isFiniteNumberArray(values) {
+    if (!values) return false;
+    for (let i = 0; i < values.length; i++) {
+        if (!Number.isFinite(values[i])) return false;
+    }
+    return true;
+}
+
+function isFiniteBox(box) {
+    return isFiniteNumberArray(box.min.toArray()) && isFiniteNumberArray(box.max.toArray());
+}
+
+function getObjectMatchNames(child) {
+    return [
+        child.name,
+        child.geometry?.name,
+        ...(Array.isArray(child.material) ? child.material : [child.material]).map((mat) => mat?.name)
+    ].filter(Boolean).join(' ');
+}
+
+function getSafeBoxFromObject(root, options = {}) {
+    const result = new THREE.Box3();
+    const meshBox = new THREE.Box3();
+    const excludePattern = options.excludePattern;
+    root.updateWorldMatrix(true, true);
+
+    root.traverse((child) => {
+        if (!child.isMesh || !child.geometry?.attributes?.position) return;
+        if (excludePattern?.test?.(getObjectMatchNames(child))) return;
+        child.updateWorldMatrix(true, false);
+        if (!isFiniteNumberArray(child.matrixWorld.elements)) return;
+
+        const positions = child.geometry.attributes.position.array;
+        if (!isFiniteNumberArray(positions)) return;
+
+        child.geometry.computeBoundingBox();
+        if (!child.geometry.boundingBox || !isFiniteBox(child.geometry.boundingBox)) return;
+
+        meshBox.copy(child.geometry.boundingBox).applyMatrix4(child.matrixWorld);
+        if (isFiniteBox(meshBox)) result.union(meshBox);
+    });
+
+    return result;
+}
+
+function getRotationPivotOffset(root, config) {
+    if (config.rotationPivot?.mode !== 'footCenterWithoutWeapon') return null;
+
+    const fullBox = getSafeBoxFromObject(root);
+    if (fullBox.isEmpty()) return null;
+
+    const bodyBox = new THREE.Box3();
+    const weaponPattern = config.rotationPivot.weaponPattern;
+    root.traverse((child) => {
+        if (!child.isMesh) return;
+        const names = getObjectMatchNames(child);
+        if (weaponPattern?.test?.(names)) return;
+        child.updateWorldMatrix(true, false);
+        const childBox = getSafeBoxFromObject(child);
+        if (!childBox.isEmpty()) bodyBox.union(childBox);
+    });
+
+    if (bodyBox.isEmpty()) return null;
+    const center = bodyBox.getCenter(new THREE.Vector3());
+    return new THREE.Vector3(center.x, fullBox.min.y, center.z);
+}
+
 function setupModel(loadedObject, index) {
     const config = state.modelConfigs[index];
     removeConfiguredMeshes(loadedObject, config);
+    removeInvalidGeometryMeshes(loadedObject);
     loadedObject.updateMatrixWorld(true);
-    const box = new THREE.Box3().setFromObject(loadedObject);
+    const box = getSafeBoxFromObject(loadedObject, config.viewBounds);
+    if (box.isEmpty()) {
+        box.setFromCenterAndSize(new THREE.Vector3(), new THREE.Vector3(1, 1, 1));
+    }
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.y, size.z);
@@ -1159,17 +1537,25 @@ function setupModel(loadedObject, index) {
     const object = new THREE.Group();
     object.name = config.label || loadedObject.name || `Model ${index + 1}`;
     object.animations = loadedObject.animations || [];
-    object.add(loadedObject);
+    const modelRoot = config.preserveAnimatedRootTransform ? new THREE.Group() : loadedObject;
+    if (config.preserveAnimatedRootTransform) {
+        modelRoot.name = `${object.name} View Transform`;
+        modelRoot.add(loadedObject);
+        object.add(modelRoot);
+    } else {
+        object.add(loadedObject);
+    }
 
-    loadedObject.scale.multiplyScalar(scale);
-    loadedObject.updateMatrixWorld(true);
+    modelRoot.scale.multiplyScalar(scale);
+    modelRoot.updateMatrixWorld(true);
 
-    const scaledBox = new THREE.Box3().setFromObject(loadedObject);
-    const scaledCenter = scaledBox.getCenter(new THREE.Vector3());
-    loadedObject.position.x -= scaledCenter.x;
-    loadedObject.position.z -= scaledCenter.z;
-    loadedObject.position.y -= scaledBox.min.y;
-    loadedObject.updateMatrixWorld(true);
+    const rotationPivotOffset = getRotationPivotOffset(modelRoot, config);
+    const scaledBox = getSafeBoxFromObject(modelRoot, config.viewBounds);
+    const scaledCenter = rotationPivotOffset || scaledBox.getCenter(new THREE.Vector3());
+    modelRoot.position.x -= scaledCenter.x;
+    modelRoot.position.z -= scaledCenter.z;
+    modelRoot.position.y -= scaledBox.min.y;
+    modelRoot.updateMatrixWorld(true);
 
     object.traverse((child) => {
         if (child.isMesh) {
@@ -1186,6 +1572,7 @@ function setupModel(loadedObject, index) {
                 : [standardGreyMaterial];
             sourceMaterials.forEach((m, materialIndex) => {
                 applyConfiguredTextures(m, config, materialIndex);
+                applyMaterialAdjustments(m, config);
                 if (m.map) m.map.colorSpace = THREE.SRGBColorSpace;
                 if (config.useEmbeddedOpacity) applyEmbeddedOpacity(m, config.alphaCutoffs?.[m.name]);
             });
@@ -1195,6 +1582,7 @@ function setupModel(loadedObject, index) {
                 ? sourceMaterials.map((m, materialIndex) => {
                     const clone = createDisplayMaterial(m, config);
                     applyConfiguredTextures(clone, config, materialIndex);
+                    applyMaterialAdjustments(clone, config);
                     if (config.useEmbeddedOpacity) applyEmbeddedOpacity(clone, config.alphaCutoffs?.[clone.name]);
                     return clone;
                 })
@@ -1221,46 +1609,93 @@ function setupModel(loadedObject, index) {
     return object;
 }
 
-function showModel(index) {
+function applyModelLighting(config = {}) {
+    const rig = {
+        key: 0.75,
+        fill: 0.6,
+        rim: 0.45,
+        ambient: 0.85,
+        hemisphere: 0.7,
+        bruteFill: 0,
+        ...(config.lightRig || {})
+    };
+
+    dirLight.intensity = rig.key;
+    fillLight.intensity = rig.fill;
+    rimLight.intensity = rig.rim;
+    ambientLight.intensity = rig.ambient;
+    hemiLight.intensity = rig.hemisphere;
+    bruteFillLight.intensity = rig.bruteFill;
+    bruteFillLight.visible = rig.bruteFill > 0;
+}
+
+function getPlayableAnimations(animations, config = {}) {
+    const removeTrackPatterns = config.removeAnimationTracks || [];
+    if (!removeTrackPatterns.length) return animations;
+
+    return animations
+        .map((clip) => {
+            const tracks = clip.tracks.filter((track) => {
+                return !removeTrackPatterns.some((pattern) => pattern.test(track.name));
+            });
+            return new THREE.AnimationClip(clip.name, clip.duration, tracks, clip.blendMode);
+        })
+        .filter((clip) => clip.tracks.length > 0);
+}
+
+async function showModel(index) {
+    const model = await ensureModelLoaded(index).catch((error) => {
+        console.error(`Could not show model ${index + 1}:`, error);
+        document.getElementById('loading-text').textContent = `Could not load ${state.modelConfigs[index]?.label || `Model ${index + 1}`}.`;
+        return null;
+    });
+    if (!model) return;
+
     if (state.currentModel) {
         scene.remove(state.currentModel);
         clearOverlays();
     }
 
     state.currentModelIndex = index;
-    const model = state.models[index];
-    if (!model) return;
-
     model.rotation.set(0, 0, 0);
     state.autoDisplayElapsed = 0;
     state.currentModel = model;
     scene.add(model);
+    applyModelLighting(state.modelConfigs[index]);
 
-    state.animations = model.animations || [];
+    state.animations = getPlayableAnimations(model.animations || [], state.modelConfigs[index]);
     setupAnimations(model);
     updateStats(model);
     applyRenderMode();
-    fitCamera(model);
+    fitCamera(model, state.modelConfigs[index]);
     drawUVMap();
 
     document.querySelectorAll('.model-btn').forEach(btn => {
         btn.classList.toggle('active', parseInt(btn.dataset.model) === index);
     });
+    hideLoading();
 }
 
-function fitCamera(object) {
+function fitCamera(object, config = {}) {
     object.updateMatrixWorld(true);
-    const box = new THREE.Box3().setFromObject(object);
+    const box = getSafeBoxFromObject(object, config.viewBounds);
+    if (box.isEmpty()) return;
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.y, size.z);
     const radius = size.length() * 0.5;
     const fov = THREE.MathUtils.degToRad(camera.fov);
     const fitHeightDistance = radius / Math.sin(fov / 2);
-    const dist = Math.max(fitHeightDistance * 0.92, maxDim * 1.08);
+    const dist = Math.max(fitHeightDistance * 0.92, maxDim * 1.08) * (config.cameraDistanceScale || 1);
+    const target = center.clone();
+    if (config.cameraTargetOffset) {
+        target.x += config.cameraTargetOffset.x || 0;
+        target.y += config.cameraTargetOffset.y || 0;
+        target.z += config.cameraTargetOffset.z || 0;
+    }
 
-    controls.target.copy(center);
-    camera.position.set(center.x + dist * 0.58, center.y + dist * 0.34, center.z + dist * 0.58);
+    controls.target.copy(target);
+    camera.position.set(target.x + dist * 0.58, target.y + dist * 0.34, target.z + dist * 0.58);
     camera.near = Math.max(dist / 100, 0.01);
     camera.far = dist * 100;
     camera.updateProjectionMatrix();
@@ -1315,6 +1750,10 @@ function setupAnimations(model) {
 
     panel.style.display = 'flex';
     state.mixer = new THREE.AnimationMixer(model);
+    const defaultSpeed = state.modelConfigs[state.currentModelIndex]?.animationSpeed || 1;
+    state.mixer.timeScale = defaultSpeed;
+    document.getElementById('anim-speed').value = defaultSpeed;
+    document.getElementById('anim-speed-val').textContent = defaultSpeed.toFixed(1) + 'x';
 
     state.animations.forEach((clip, i) => {
         const opt = document.createElement('option');
@@ -1852,9 +2291,9 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 
 // Model buttons
 document.querySelectorAll('.model-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
         const idx = parseInt(btn.dataset.model);
-        if (state.models[idx]) showModel(idx);
+        await showModel(idx);
     });
 });
 
@@ -1878,11 +2317,11 @@ function setAutoDisplay(enabled) {
     }
 }
 
-function showNextAutoDisplayModel() {
+async function showNextAutoDisplayModel() {
     for (let i = 1; i <= state.models.length; i++) {
         const nextIndex = (state.currentModelIndex + i) % state.models.length;
-        if (state.models[nextIndex]) {
-            showModel(nextIndex);
+        if (state.modelConfigs[nextIndex]) {
+            await showModel(nextIndex);
             return;
         }
     }
@@ -1918,9 +2357,9 @@ document.addEventListener('keydown', (e) => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
 
     switch (e.key) {
-        case '1': case '2': case '3': case '4': {
+        case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9': {
             const idx = parseInt(e.key) - 1;
-            if (state.models[idx]) showModel(idx);
+            if (state.modelConfigs[idx]) showModel(idx);
             break;
         }
         case 'w': case 'W':
@@ -1960,7 +2399,7 @@ document.addEventListener('keydown', (e) => {
             }
             break;
         case 'r': case 'R':
-            if (state.currentModel) fitCamera(state.currentModel);
+            if (state.currentModel) fitCamera(state.currentModel, state.modelConfigs[state.currentModelIndex]);
             break;
     }
 });
@@ -2013,7 +2452,7 @@ setupUVControls();
 
 // ─── Init ───
 async function init() {
-    showLoading('Looking for models...');
+    showLoading('Loading first model...');
 
     if (window.location.protocol === 'file:') {
         document.getElementById('loading-text').textContent = 'Run this through a local server. Do not open index.html directly.';
@@ -2022,21 +2461,15 @@ async function init() {
         return;
     }
 
-    const results = await detectModels();
-    const loaded = results.filter(r => r && r.model);
+    state.modelConfigs.forEach((config, index) => {
+        const btn = document.querySelector(`[data-model="${index}"]`);
+        if (btn) btn.textContent = config.label || `Model ${index + 1}`;
+    });
 
-    if (loaded.length > 0) {
-        loaded.forEach(({ model, index }) => setupModel(model, index));
-        showModel(loaded[0].index);
+    if (state.modelConfigs.length > 0) {
+        await showModel(0);
     } else {
-        const failedPaths = results
-            .filter(r => r && r.error)
-            .map(r => r.url)
-            .join(', ');
-        console.error('No preset FBX models loaded. Failed paths:', failedPaths);
-        document.getElementById('loading-text').textContent = failedPaths
-            ? `Could not load presets: ${failedPaths}`
-            : 'No preset models found.';
+        document.getElementById('loading-text').textContent = 'No preset models found.';
         animate();
         return;
     }

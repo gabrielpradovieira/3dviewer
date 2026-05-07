@@ -1,3 +1,6 @@
 *.tx
 .mayaSwatches/
 .vrayThumbs/
+models/model7/images/
+models/model8/images/
+models/model8/BusterDrone*.fbx
