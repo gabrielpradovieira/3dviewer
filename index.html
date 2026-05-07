@@ -852,9 +852,30 @@ const state = {
     models: [null, null, null, null, null, null, null, null, null],
     loadingPromises: new Map(),
     modelConfigs: [
-        { path: 'models/model1/', file: 'Hammer.fbx', label: 'Hammer', rotateAxis: 'y' },
-        { path: 'models/model2/', file: 'Blade.fbx', label: 'Blade', rotateAxis: 'y' },
-        { path: 'models/model3/', file: 'Cargo_Transporter.fbx', label: 'Cargo Transporter', rotateAxis: 'y' },
+        {
+            path: 'models/model1/',
+            file: 'Hammer.fbx',
+            label: 'Hammer',
+            rotateAxis: 'y',
+            lightRig: { key: 1.05, fill: 0.4, rim: 0.95, ambient: 0.58, hemisphere: 0.45 },
+            materialAdjust: { exposure: 1.04, saturation: 0.97, roughnessMax: 0.26, metalnessMin: 0.05, envIntensity: 1.2 }
+        },
+        {
+            path: 'models/model2/',
+            file: 'Blade.fbx',
+            label: 'Blade',
+            rotateAxis: 'y',
+            lightRig: { key: 1.05, fill: 0.4, rim: 0.95, ambient: 0.58, hemisphere: 0.45 },
+            materialAdjust: { exposure: 1.04, saturation: 0.97, roughnessMax: 0.26, metalnessMin: 0.05, envIntensity: 1.2 }
+        },
+        {
+            path: 'models/model3/',
+            file: 'Cargo_Transporter.fbx',
+            label: 'Cargo Transporter',
+            rotateAxis: 'y',
+            lightRig: { key: 1.05, fill: 0.4, rim: 0.95, ambient: 0.58, hemisphere: 0.45 },
+            materialAdjust: { exposure: 1.04, saturation: 0.97, roughnessMax: 0.26, metalnessMin: 0.05, envIntensity: 1.2 }
+        },
         {
             path: 'models/model4/',
             file: 'fiesta_tea.fbx',
@@ -884,11 +905,12 @@ const state = {
             rotateAxis: 'y',
             useOriginalMaterials: true,
             lightRig: { key: 0.9, fill: 1.15, rim: 0.85, ambient: 0.72, hemisphere: 0.75, bruteFill: 1.35 },
-            viewBounds: { excludePattern: /Object_(16|20|21|22|37)|sword|blade|weapon|razor_metal/i },
-            cameraDistanceScale: 0.34,
-            cameraTargetOffset: { y: -1.35 },
-            rotationPivot: { mode: 'footCenterWithoutWeapon', weaponPattern: /Object_(16|20|21|22|37)|sword|blade|weapon|razor_metal/i },
-            materialAdjust: { exposure: 1.12, saturation: 0.94, metalnessMapDarken: 0.72, roughnessMin: 0.32, metalnessMax: 1.0, envIntensity: 1.05, emissiveBoost: 0 }
+            viewBounds: { excludePattern: /Object_(16|20|21|22|37)|sword|blade|weapon|razor_metal/i, preciseSkinned: true },
+            scaleMultiplier: 6.0,
+            cameraDistanceScale: 0.9,
+            cameraTargetOffset: { y: 0.55 },
+            rotationPivot: { mode: 'footMidpointWithoutWeapon', weaponPattern: /Object_(16|20|21|22|37)|sword|blade|weapon|razor_metal/i, footPattern: /shoe|boot|feet|foot|Skin|leather/i },
+            materialAdjust: { exposure: 1.12, saturation: 0.94, metalnessMapDarken: 0.25, roughnessMin: 0.32, metalnessMax: 1.0, envIntensity: 1.05, emissiveBoost: 0 }
         },
         { path: 'models/model6/', file: 'cuphead.glb', label: 'Cuphead', rotateAxis: 'y', useOriginalMaterials: true, animationSpeed: 2.4 },
         {
@@ -1235,6 +1257,9 @@ function applyMaterialAdjustments(material, config) {
     if (adjust.roughnessMin !== undefined) {
         material.roughness = Math.max(material.roughness ?? 0.5, adjust.roughnessMin);
     }
+    if (adjust.roughnessMax !== undefined) {
+        material.roughness = Math.min(material.roughness ?? 0.5, adjust.roughnessMax);
+    }
     if (material.metalnessMap && adjust.metalnessMapDarken !== undefined) {
         if (material.metalnessMap.image?.complete || material.metalnessMap.image?.width) {
             material.metalnessMap = darkenScalarTexture(material.metalnessMap, adjust.metalnessMapDarken);
@@ -1244,6 +1269,9 @@ function applyMaterialAdjustments(material, config) {
                 material.needsUpdate = true;
             });
         }
+    }
+    if (adjust.metalnessMin !== undefined) {
+        material.metalness = Math.max(material.metalness ?? 0, adjust.metalnessMin);
     }
     if (adjust.metalnessMax !== undefined) {
         material.metalness = Math.min(material.metalness ?? 0, adjust.metalnessMax);
@@ -1473,49 +1501,77 @@ function getObjectMatchNames(child) {
     ].filter(Boolean).join(' ');
 }
 
+function expandBoxByRenderableMesh(child, targetBox, options = {}) {
+    if (!child.geometry?.attributes?.position || child.visible === false) return;
+    child.updateWorldMatrix(true, false);
+    if (!isFiniteNumberArray(child.matrixWorld.elements)) return;
+
+    const positions = child.geometry.attributes.position;
+    if (!positions?.array || !isFiniteNumberArray(positions.array)) return;
+
+    if (options.preciseSkinned && child.isSkinnedMesh && positions.count > 0) {
+        const point = new THREE.Vector3();
+        for (let i = 0; i < positions.count; i++) {
+            point.fromBufferAttribute(positions, i);
+            if (typeof child.applyBoneTransform === 'function') {
+                child.applyBoneTransform(i, point);
+            } else if (typeof child.boneTransform === 'function') {
+                child.boneTransform(i, point);
+            }
+            point.applyMatrix4(child.matrixWorld);
+            if (isFiniteNumberArray(point.toArray())) targetBox.expandByPoint(point);
+        }
+        return;
+    }
+
+    child.geometry.computeBoundingBox();
+    if (!child.geometry.boundingBox || !isFiniteBox(child.geometry.boundingBox)) return;
+
+    const meshBox = new THREE.Box3().copy(child.geometry.boundingBox).applyMatrix4(child.matrixWorld);
+    if (isFiniteBox(meshBox)) targetBox.union(meshBox);
+}
+
 function getSafeBoxFromObject(root, options = {}) {
     const result = new THREE.Box3();
-    const meshBox = new THREE.Box3();
     const excludePattern = options.excludePattern;
     root.updateWorldMatrix(true, true);
 
     root.traverse((child) => {
         if (!child.isMesh || !child.geometry?.attributes?.position) return;
         if (excludePattern?.test?.(getObjectMatchNames(child))) return;
-        child.updateWorldMatrix(true, false);
-        if (!isFiniteNumberArray(child.matrixWorld.elements)) return;
-
-        const positions = child.geometry.attributes.position.array;
-        if (!isFiniteNumberArray(positions)) return;
-
-        child.geometry.computeBoundingBox();
-        if (!child.geometry.boundingBox || !isFiniteBox(child.geometry.boundingBox)) return;
-
-        meshBox.copy(child.geometry.boundingBox).applyMatrix4(child.matrixWorld);
-        if (isFiniteBox(meshBox)) result.union(meshBox);
+        expandBoxByRenderableMesh(child, result, options);
     });
 
     return result;
 }
 
 function getRotationPivotOffset(root, config) {
-    if (config.rotationPivot?.mode !== 'footCenterWithoutWeapon') return null;
+    if (!config.rotationPivot?.mode) return null;
 
     const fullBox = getSafeBoxFromObject(root);
     if (fullBox.isEmpty()) return null;
 
     const bodyBox = new THREE.Box3();
     const weaponPattern = config.rotationPivot.weaponPattern;
+    const footPattern = config.rotationPivot.footPattern;
+    const footBox = new THREE.Box3();
     root.traverse((child) => {
         if (!child.isMesh) return;
         const names = getObjectMatchNames(child);
         if (weaponPattern?.test?.(names)) return;
         child.updateWorldMatrix(true, false);
         const childBox = getSafeBoxFromObject(child);
-        if (!childBox.isEmpty()) bodyBox.union(childBox);
+        if (!childBox.isEmpty()) {
+            bodyBox.union(childBox);
+            if (footPattern?.test?.(names)) footBox.union(childBox);
+        }
     });
 
     if (bodyBox.isEmpty()) return null;
+    if (config.rotationPivot.mode === 'footMidpointWithoutWeapon' && !footBox.isEmpty()) {
+        const footCenter = footBox.getCenter(new THREE.Vector3());
+        return new THREE.Vector3(footCenter.x, fullBox.min.y, footCenter.z);
+    }
     const center = bodyBox.getCenter(new THREE.Vector3());
     return new THREE.Vector3(center.x, fullBox.min.y, center.z);
 }
@@ -1532,7 +1588,7 @@ function setupModel(loadedObject, index) {
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.y, size.z);
-    const scale = maxDim > 0 ? 3 / maxDim : 1;
+    const scale = (maxDim > 0 ? 3 / maxDim : 1) * (config.scaleMultiplier || 1);
 
     const object = new THREE.Group();
     object.name = config.label || loadedObject.name || `Model ${index + 1}`;
@@ -2399,6 +2455,7 @@ document.addEventListener('keydown', (e) => {
             }
             break;
         case 'r': case 'R':
+        case 'f': case 'F':
             if (state.currentModel) fitCamera(state.currentModel, state.modelConfigs[state.currentModelIndex]);
             break;
     }
