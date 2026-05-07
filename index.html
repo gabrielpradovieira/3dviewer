@@ -633,6 +633,10 @@
         <div class="check-box"></div>
         <span>Auto Display</span>
     </div>
+    <div class="sidebar-item" data-mode="darkbg">
+        <div class="check-box"></div>
+        <span>Dark Background</span>
+    </div>
     <div class="slider-row" id="rotate-speed-row" style="display:none">
         <label>Speed</label>
         <input type="range" id="rotate-speed" min="0.1" max="5" step="0.1" value="2">
@@ -857,6 +861,8 @@ const state = {
             file: 'Hammer.fbx',
             label: 'Hammer',
             rotateAxis: 'y',
+            cameraDistanceScale: 0.82,
+            cameraTargetOffset: { y: 0.2, x: 0.08 },
             lightRig: { key: 1.05, fill: 0.4, rim: 0.95, ambient: 0.58, hemisphere: 0.45 },
             materialAdjust: { exposure: 1.04, saturation: 0.97, roughnessMax: 0.26, metalnessMin: 0.05, envIntensity: 1.2 }
         },
@@ -996,6 +1002,7 @@ const state = {
     autoDisplayElapsed: 0,
     autoDisplayInterval: 15,
     showGrid: true,
+    darkBackground: false,
     show2D: false,
     uvView: {
         scale: 1,
@@ -1008,6 +1015,10 @@ const state = {
         lastPinchDistance: 0
     }
 };
+
+function updateViewportBackground() {
+    scene.background = new THREE.Color(state.darkBackground ? 0x5a5a5a : 0xd0d0d0);
+}
 
 // ─── Model Loading ───
 const fbxLoader = new FBXLoader();
@@ -2283,7 +2294,7 @@ function applyUVChecker() {
 
 // ─── Sidebar interaction ───
 const sidebarItems = document.querySelectorAll('.sidebar-item');
-const toggleModes = ['wireframe', 'vertexnormals', 'uvchecker', 'grid', 'autorotate', 'autodisplay'];
+const toggleModes = ['wireframe', 'vertexnormals', 'uvchecker', 'grid', 'autorotate', 'autodisplay', 'darkbg'];
 
 sidebarItems.forEach(item => {
     item.addEventListener('click', () => {
@@ -2305,6 +2316,10 @@ sidebarItems.forEach(item => {
             }
             if (mode === 'autodisplay') {
                 setAutoDisplay(item.classList.contains('active'));
+            }
+            if (mode === 'darkbg') {
+                state.darkBackground = item.classList.contains('active');
+                updateViewportBackground();
             }
             applyRenderMode();
             return;
@@ -2445,6 +2460,11 @@ document.addEventListener('keydown', (e) => {
             state.showGrid = !state.showGrid;
             gridHelper.visible = state.showGrid;
             document.querySelector('[data-mode="grid"]').classList.toggle('active', state.showGrid);
+            break;
+        case 'b': case 'B':
+            state.darkBackground = !state.darkBackground;
+            document.querySelector('[data-mode="darkbg"]').classList.toggle('active', state.darkBackground);
+            updateViewportBackground();
             break;
         case ' ':
             e.preventDefault();
